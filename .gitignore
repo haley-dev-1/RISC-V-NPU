@@ -1,0 +1,23 @@
+# do not commit these - that would bring the repo to many GBs large. Install yourself through Webinar 3 instructions.
+
+# toolchains / infrastructure
+OpenLane/
+OpenROAD/
+yosys/
+verilator/
+klayout/
+tinyQV/
+tinyqv-byte-peripheral-template/
+tinyqv-full-peripheral-template/
+
+# generated outputs
+build/
+runs/
+results/
+tmp/
+logs/
+*.log
+
+# OS/editor
+.DS_Store
+.vscode/
