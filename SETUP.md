@@ -48,9 +48,7 @@ cd yosys
 make
 sudo make install
 make test
-```
 
-```
 mkdir build
 cd build
 make -f ../Makefile
@@ -121,10 +119,7 @@ source ~/.bashrc
 
 now i can use openroad to open it
 
-./build/bin/openroad -version
-
-
-checks version
+./build/bin/openroad -version # checks version
 
 # /AIHDL/OpenROAD/build/bin$ ./openroad
 
@@ -159,4 +154,73 @@ klayout -e -nn $PDK_ROOT/sky130A/libs.tech/klayout/tech/sky130A.lyt \
 
 In Webinar 3 video on YouTube, after all this works, you can work through the example run.
 
+
+
+##############################################################################
+######################## SETTING UP FOR NEW PHASES ###########################
+################################################################################
+
+
+# From DP#1 Example Project Run
+```
+mkdir dpN
+# under /tinyQV/ iceFUN and pico_ice are for verification. 
+# Cpu and Peripheral files are the required ones.
+
+# in tinyQC full peripheral template/src lives tt_wrapper.v and peripheral.v
+
+git clone https://github.com/TinyTapeout/tinyqv-byte-peripheral-template.git
+cd tinyqv- tab
+cd src
+```
+
+```
+
+# How do I run this?! Use AI to screenshot command prompt log and ask AI for help. 
+# e.g. in dp1/ copy the contents and say "I want to run synthesis using yosys"
+
+# synth.ys <- yosys script we can use this file to to run particular commands 
+
+#then,
+nano synth.ys # we copy ai log into this for our synthesis file 
+
+###
+### ...
+###
+
+yosys -s synth.ys
+# or yosys synth.ys
+
+# my peripheral design is synthesizing and working if yosys synth.ys works! 
+
+## Next we run docker module for openlane - - openlane is for PPA analysis ## 
+
+~/AIHDL/dp1$ cd ..
+~/AIHDL$ cp -r ./dp1 
+./OpenLane/designs/
+
+# openlane uses config.json to run a design
+
+####################################### BACK TO OPENLANE #########################################
+
+cd AIHDL/OpenLane/
+make
+make mount # using docker now
+./flow.tcl -design dp1 -tag dp1_run -overwrite # command for docker 
+# or ./flow.tcl itself
+# ./flow.tcl -design dp1
+
+cd to designs
+# we will have runs and other things in the runs directory
+# find matrix.csv
+# this file looks like gibberish, but we need to open it in excel (Windows file explorer, this PC, ... mnt)
+# area, total no. of cells, total internal power, and slack timing. CRITICAL PATH. Etc, etc, etc. 
+
+
+########### METRICS.CSV ###################
+~/haley/AIHDL/OpenLane/designs/dp1$ cd runs/
+~/AIHDL/OpenLane/designs/dp1/runs$ ls
+dp1_run
+~/AIHDL/OpenLane/designs/dp1/runs/dp1_run$ cd reportS
+# Reports should hod the metrics we use for PPA.
 ```
