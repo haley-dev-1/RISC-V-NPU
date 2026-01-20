@@ -1,0 +1,3 @@
+[submodule "tinyqv-full-peripheral-template"]
+	path = tinyqv-full-peripheral-template
+	url = https://github.com/TinyTapeout/tinyqv-full-peripheral-template
