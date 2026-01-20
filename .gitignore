@@ -8,7 +8,7 @@ verilator/
 klayout/
 tinyQV/
 tinyqv-byte-peripheral-template/
-tinyqv-full-peripheral-template/
+!tinyqv-full-peripheral-template/src
 
 # generated outputs
 build/
