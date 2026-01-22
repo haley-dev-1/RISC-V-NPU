@@ -1,20 +1,20 @@
 # RISC-V-NPU
 AI Hardware Design League (AI-HDL) competition repository for integrating an NPU co-processor/extension onto a base RISC-V CPU.
 
-# Competition rules
+## Competition rules
 - we do not modify any of the RISC-V CPU verilog modules
 - we DO modify the peripheral modules (peripheral.v)
 - tt_wrapper.v (top module for connecting top module to cpu module)
 - Leverage LLMs --> NO HUMAN CODE ALLOWED!
 - Utilize prompt log and engineering. Do not just say 'hey design me an NPU', no, be thoughtful - this earns us major points. 
 
-# Branch rules (4-tier)
+## Branch rules (4-tier)
 1. Production   <- main
 2. Test/QA      <- copy of main
 3. Dev          <- development
 4. Others       <- other branches (ours for features/tasks/anything else) ... based off dev
 
-# Prior information from last year (I did my research...) 
+## Prior information from last year (I did my research...) 
 youtube link: https://www.youtube.com/watch?v=qnI-e7D9PaI
 LLM information (I put the link into notebook.lm):
 * Overall Grand Prize Winner: The team "AI or die" won the best design overall, dominating both the undergraduate division and the general competition with high scores across all judged categories. They received a $5,000 cash prize.
@@ -26,3 +26,64 @@ The teams that won succeeded by navigating a multi-phase design process and meet
 * Hardware Security Integration: A critical factor for winning—and the focus of the final design phase—was the ability to incorporate security features at the design level. The "Most Secure Design" winner was chosen based on "very creative ways" to mitigate hardware vulnerabilities, which is more cost-effective than fixing issues after fabrication.
 * Persistence and Bravery: Interestingly, the sources highlight that most participants had no prior experience with chip design. Success was attributed to students being "brave enough" to persist through the learning curve of world-class tools without a traditional background.
 * Collaborative Design: Successful teams effectively managed the "design phases," which included setting up fundamentals, adding complex functionality, and finally performing deep optimization.
+
+# Usage
+
+
+## Building and running MAC and/or Systolic Array with VERILATOR
+
+## Prerequisites
+
+- Verilator installed (`verilator --version`)
+- A C++ toolchain available (g++, make), since `--binary` generates and compiles a C++ harness.
+
+---
+
+## General build + run pattern (important)
+
+Verilator compiles into `obj_dir/`. If you change which testbench is the top module, you should
+delete `obj_dir/` first to avoid confusion.
+
+**Always do:**
+1) `rm -rf obj_dir`
+2) `verilator ... --top-module <testbench_top> ...`
+3) run the matching `./obj_dir/V<testbench_top>`
+
+---
+
+# 1) Build & run the MAC testbench
+
+### Files involved
+- DUT: `src/mac.v`
+- Testbench: `testbench/tb_mac.sv`
+- Top module: `tb_mac`
+
+### Commands for MAC
+```bash
+rm -rf obj_dir
+
+verilator --binary -sv -Wall -Wno-fatal -j 0 \
+  --top-module tb_mac \
+  src/mac.v \
+  testbench/tb_mac.sv
+
+./obj_dir/Vtb_mac
+
+```
+### Files involved
+- DUT: src/systolic.v
+- TestBench: testbench/tb_systolic.sv
+- Top module: tb_mac
+
+### Commands for Systolic
+```bash
+rm -rf obj_dir
+
+verilator --binary -sv -Wall -Wno-fatal -j 0 \
+  --top-module tb_systolic \
+  src/mac.v \
+  src/systolic.v \
+  testbench/tb_systolic.sv
+
+./obj_dir/Vtb_systolic
+```
