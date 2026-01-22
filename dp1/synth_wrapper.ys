@@ -2,5 +2,9 @@ read_verilog -sv src/tt_wrapper.v
 read_verilog -sv src/peripheral.v
 read_verilog -sv src/test_harness/*.sv
 
+# For AI accelerator
+read_verilog -sv src/systolic.v
+read_verilog -sv src/mac.v
+
 synth -top tt_um_tqv_peripheral_harness
 write_json wrapper.json

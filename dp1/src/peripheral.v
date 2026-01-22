@@ -1,86 +1,122 @@
 /*
- * Copyright (c) 2025 Your Name
- * SPDX-License-Identifier: Apache-2.0
+ * peripheral.v
+ *
+ * TinyQV Peripheral: Minimal NPU MVP
+ *
+ * Register map (address is 6-bit word index, not byte address):
+ *   0x00: REG_A     (W) operand A
+ *   0x01: REG_B     (W) operand B
+ *   0x02: CTRL      (W) bit0 = start (pulse)
+ *   0x03: RESULT    (R) computation result
+ *   0x04: STATUS    (R) bit0 = done
+ *   0x05: DONE_CLR  (W) write 1 to clear done (optional but recommended)
+ *
+ * Notes:
+ * - data_write_n: 2'b10 indicates 32-bit write (what we use for MVP)
+ * - data_read_n is not used for behavior, but is included to prevent warnings
  */
 
 `default_nettype none
 
-// Change the name of this module to something that reflects its functionality and includes your name for uniqueness
-// For example tqvp_yourname_spi for an SPI peripheral.
-// Then edit tt_wrapper.v line 41 and change tqvp_example to your chosen module name.
 module tqvp_example (
-    input         clk,          // Clock - the TinyQV project clock is normally set to 64MHz.
-    input         rst_n,        // Reset_n - low to reset.
+    input         clk,
+    input         rst_n,
 
-    input  [7:0]  ui_in,        // The input PMOD, always available.  Note that ui_in[7] is normally used for UART RX.
-                                // The inputs are synchronized to the clock, note this will introduce 2 cycles of delay on the inputs.
+    input  [7:0]  ui_in,
+    output [7:0]  uo_out,
 
-    output [7:0]  uo_out,       // The output PMOD.  Each wire is only connected if this peripheral is selected.
-                                // Note that uo_out[0] is normally used for UART TX.
+    input  [5:0]   address,
+    input  [31:0]  data_in,
 
-    input [5:0]   address,      // Address within this peripheral's address space
-    input [31:0]  data_in,      // Data in to the peripheral, bottom 8, 16 or all 32 bits are valid on write.
+    input  [1:0]   data_write_n,
+    input  [1:0]   data_read_n,
 
-    // Data read and write requests from the TinyQV core.
-    input [1:0]   data_write_n, // 11 = no write, 00 = 8-bits, 01 = 16-bits, 10 = 32-bits
-    input [1:0]   data_read_n,  // 11 = no read,  00 = 8-bits, 01 = 16-bits, 10 = 32-bits
-    
-    output [31:0] data_out,     // Data out from the peripheral, bottom 8, 16 or all 32 bits are valid on read when data_ready is high.
-    output        data_ready,
+    output [31:0]  data_out,
+    output         data_ready,
 
-    output        user_interrupt  // Dedicated interrupt request for this peripheral
+    output         user_interrupt
 );
 
-    // Implement a 32-bit read/write register at address 0
-    reg [31:0] example_data;
+    // --------------------------------------------------------------------
+    // NPU control registers (MMIO-visible)
+    // --------------------------------------------------------------------
+    reg [31:0] reg_a;
+    reg [31:0] reg_b;
+
+    // start is a 1-cycle pulse into systolic
+    reg        reg_start;
+
+    // result + done are latched for easy software polling
+    reg [31:0] reg_result;
+    reg        reg_done;
+
+    // --------------------------------------------------------------------
+    // Compute core interface
+    // --------------------------------------------------------------------
+    wire [31:0] sys_result;
+    wire        sys_done;
+
+    systolic u_systolic (
+        .clk    (clk),
+        .rst_n  (rst_n),
+        .start  (reg_start),
+        .a      (reg_a),
+        .b      (reg_b),
+        .result (sys_result),
+        .done   (sys_done)
+    );
+
+    // --------------------------------------------------------------------
+    // Write decode
+    // --------------------------------------------------------------------
     always @(posedge clk) begin
         if (!rst_n) begin
-            example_data <= 0;
+            reg_a      <= 32'd0;
+            reg_b      <= 32'd0;
+            reg_start  <= 1'b0;
+            reg_result <= 32'd0;
+            reg_done   <= 1'b0;
         end else begin
-            if (address == 6'h0) begin
-                if (data_write_n != 2'b11)              example_data[7:0]   <= data_in[7:0];
-                if (data_write_n[1] != data_write_n[0]) example_data[15:8]  <= data_in[15:8];
-                if (data_write_n == 2'b10)              example_data[31:16] <= data_in[31:16];
+            // default: start is a pulse
+            reg_start <= 1'b0;
+
+            // latch result/done when compute finishes
+            if (sys_done) begin
+                reg_result <= sys_result;
+                reg_done   <= 1'b1;
+            end
+
+            // Handle writes
+            if (data_write_n != 2'b11) begin
+                case (address)
+                    6'h00: reg_a <= data_in;           // REG_A
+                    6'h01: reg_b <= data_in;           // REG_B
+                    6'h02: reg_start <= data_in[0];    // CTRL.start pulse
+                    6'h05: if (data_in[0]) reg_done <= 1'b0; // DONE_CLR
+                    default: ;
+                endcase
             end
         end
     end
 
-    // The bottom 8 bits of the stored data are added to ui_in and output to uo_out.
-    assign uo_out = example_data[7:0] + ui_in;
+    // --------------------------------------------------------------------
+    // Read mux
+    // --------------------------------------------------------------------
+    assign data_out =
+        (address == 6'h03) ? reg_result :
+        (address == 6'h04) ? {31'd0, reg_done} :
+        32'd0;
 
-    // Address 0 reads the example data register.  
-    // Address 4 reads ui_in
-    // All other addresses read 0.
-    assign data_out = (address == 6'h0) ? example_data :
-                      (address == 6'h4) ? {24'h0, ui_in} :
-                      32'h0;
+    // For MVP, always ready in 1 cycle
+    assign data_ready = 1'b1;
 
-    // All reads complete in 1 clock
-    assign data_ready = 1;
-    
-    // User interrupt is generated on rising edge of ui_in[6], and cleared by writing a 1 to the low bit of address 8.
-    reg example_interrupt;
-    reg last_ui_in_6;
+    // No interrupt in MVP (keep it simple)
+    assign user_interrupt = 1'b0;
 
-    always @(posedge clk) begin
-        if (!rst_n) begin
-            example_interrupt <= 0;
-        end
+    // For now, drive outputs low (or use debug bits if you want)
+    assign uo_out = 8'd0;
 
-        if (ui_in[6] && !last_ui_in_6) begin
-            example_interrupt <= 1;
-        end else if (address == 6'h8 && data_write_n != 2'b11 && data_in[0]) begin
-            example_interrupt <= 0;
-        end
-
-        last_ui_in_6 <= ui_in[6];
-    end
-
-    assign user_interrupt = example_interrupt;
-
-    // List all unused inputs to prevent warnings
-    // data_read_n is unused as none of our behaviour depends on whether
-    // registers are being read.
-    wire _unused = &{data_read_n, 1'b0};
+    // Unused inputs
+    wire _unused = &{ui_in, data_read_n, 1'b0};
 
 endmodule
