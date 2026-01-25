@@ -1,24 +1,9 @@
-/*
- * peripheral.v
- *
- * TinyQV Peripheral: Minimal NPU MVP
- *
- * Register map (address is 6-bit word index, not byte address):
- *   0x00: REG_A     (W) operand A
- *   0x01: REG_B     (W) operand B
- *   0x02: CTRL      (W) bit0 = start (pulse)
- *   0x03: RESULT    (R) computation result
- *   0x04: STATUS    (R) bit0 = done
- *   0x05: DONE_CLR  (W) write 1 to clear done (optional but recommended)
- *
- * Notes:
- * - data_write_n: 2'b10 indicates 32-bit write (what we use for MVP)
- * - data_read_n is not used for behavior, but is included to prevent warnings
- */
-
+`timescale 1ns/1ps
 `default_nettype none
 
-module tqvp_example (
+module tqvp_example #(
+    parameter integer N = 2   // MUST match systolic.v parameter N
+)(
     input         clk,
     input         rst_n,
 
@@ -37,86 +22,143 @@ module tqvp_example (
     output         user_interrupt
 );
 
-    // --------------------------------------------------------------------
-    // NPU control registers (MMIO-visible)
-    // --------------------------------------------------------------------
-    reg [31:0] reg_a;
-    reg [31:0] reg_b;
+    // Yosys-friendly small casts for address comparisons
+localparam integer NN = N*N;
+localparam [5:0] N6  = N;
+localparam [5:0] NN6 = NN;
 
-    // start is a 1-cycle pulse into systolic
-    reg        reg_start;
-
-    // result + done are latched for easy software polling
-    reg [31:0] reg_result;
-    reg        reg_done;
 
     // --------------------------------------------------------------------
-    // Compute core interface
+    // MMIO-visible regs for input vectors
     // --------------------------------------------------------------------
-    wire [31:0] sys_result;
-    wire        sys_done;
+    reg [31:0] a_lane [0:N-1];
+    reg [31:0] b_lane [0:N-1];
 
-    systolic u_systolic (
-        .clk    (clk),
-        .rst_n  (rst_n),
-        .start  (reg_start),
-        .a      (reg_a),
-        .b      (reg_b),
-        .result (sys_result),
-        .done   (sys_done)
+    // Command pulse
+    reg        start_pulse;
+
+    // Sticky status
+    reg        done_sticky;
+
+    // Streaming interface to systolic
+    reg                 in_valid;
+    wire                in_ready;
+
+    wire                sys_busy;
+    wire                sys_done;
+
+    wire [N*32-1:0]      a_vec_in;
+    wire [N*32-1:0]      b_vec_in;
+    wire [N*N*32-1:0]    c_mat_out;
+
+    // Pack lanes into vectors (lane i at [i*32 +: 32])
+    genvar i;
+    generate
+        for (i = 0; i < N; i = i + 1) begin : PACK_IN
+            assign a_vec_in[i*32 +: 32] = a_lane[i];
+            assign b_vec_in[i*32 +: 32] = b_lane[i];
+        end
+    endgenerate
+
+    // Instantiate streaming systolic
+    systolic #(.N(N)) u_systolic (
+        .clk      (clk),
+        .rst_n    (rst_n),
+
+        .start    (start_pulse),
+        .busy     (sys_busy),
+        .done     (sys_done),
+
+        .in_valid (in_valid),
+        .in_ready (in_ready),
+
+        .a_vec_in (a_vec_in),
+        .b_vec_in (b_vec_in),
+
+        .c_mat_out(c_mat_out)
     );
 
-    // --------------------------------------------------------------------
-    // Write decode
-    // --------------------------------------------------------------------
+    integer k;
+
+    // Control logic: start pulse + in_valid handshake + sticky done
     always @(posedge clk) begin
         if (!rst_n) begin
-            reg_a      <= 32'd0;
-            reg_b      <= 32'd0;
-            reg_start  <= 1'b0;
-            reg_result <= 32'd0;
-            reg_done   <= 1'b0;
-        end else begin
-            // default: start is a pulse
-            reg_start <= 1'b0;
+            start_pulse <= 1'b0;
+            in_valid    <= 1'b0;
+            done_sticky <= 1'b0;
 
-            // latch result/done when compute finishes
+            for (k = 0; k < N; k = k + 1) begin
+                a_lane[k] <= 32'd0;
+                b_lane[k] <= 32'd0;
+            end
+        end else begin
+            // defaults
+            start_pulse <= 1'b0;
+
+            // latch done sticky when systolic finishes
             if (sys_done) begin
-                reg_result <= sys_result;
-                reg_done   <= 1'b1;
+                done_sticky <= 1'b1;
             end
 
-            // Handle writes
+            // drop in_valid when accepted
+            if (in_valid && in_ready) begin
+                in_valid <= 1'b0;
+            end
+
+            // Handle MMIO writes
             if (data_write_n != 2'b11) begin
-                case (address)
-                    6'h00: reg_a <= data_in;           // REG_A
-                    6'h01: reg_b <= data_in;           // REG_B
-                    6'h02: reg_start <= data_in[0];    // CTRL.start pulse
-                    6'h05: if (data_in[0]) reg_done <= 1'b0; // DONE_CLR
-                    default: ;
-                endcase
+                // A lanes: 0x00..0x00+N-1
+                if (address < (6'h00 + N6)) begin
+		    a_lane[address[0]] <= data_in;
+                end
+                // B lanes: 0x10..0x10+N-1
+                else if (address >= 6'h10 && address < (6'h10 + N6)) begin
+		    b_lane[address[0]] <= data_in;
+                end
+                // CTRL
+                else if (address == 6'h20) begin
+                    // bit1 clears sticky status
+                    if (data_in[1]) begin
+                        done_sticky <= 1'b0;
+                    end
+
+                    // bit0 = START (pulse) and begin streaming
+                    if (data_in[0]) begin
+                        start_pulse <= 1'b1;
+                        in_valid    <= 1'b1;
+                    end
+                end
             end
         end
     end
 
-    // --------------------------------------------------------------------
     // Read mux
-    // --------------------------------------------------------------------
+    wire [31:0] status_word = {29'd0, 1'b0, sys_busy, done_sticky};
+
+    reg [31:0] c_word;
+    integer idx;
+
+always @(*) begin
+    c_word = 32'd0;
+    idx = 0;
+    if (address >= 6'h30 && address < (6'h30 + NN6)) begin
+        idx = address - 6'h30;       // idx is integer, this is fine
+        c_word = c_mat_out[idx*32 +: 32];
+    end
+end
+
+
     assign data_out =
-        (address == 6'h03) ? reg_result :
-        (address == 6'h04) ? {31'd0, reg_done} :
+        (address == 6'h21) ? status_word :
+        (address >= 6'h30 && address < (6'h30 + NN6)) ? c_word :
         32'd0;
 
-    // For MVP, always ready in 1 cycle
     assign data_ready = 1'b1;
-
-    // No interrupt in MVP (keep it simple)
     assign user_interrupt = 1'b0;
-
-    // For now, drive outputs low (or use debug bits if you want)
     assign uo_out = 8'd0;
 
-    // Unused inputs
     wire _unused = &{ui_in, data_read_n, 1'b0};
 
 endmodule
+
+`default_nettype wire

@@ -24,6 +24,7 @@
  */
 
 `default_nettype none
+`timescale 1ns/1ps
 
 module systolic #(
     parameter int N = 2
@@ -90,8 +91,8 @@ module systolic #(
     reg [$clog2(N+1)-1:0] beats_accepted;
     reg                   started;
 
-    assign in_ready = busy && (beats_accepted < N);
-
+    assign in_ready = busy && (beats_accepted < $clog2(N+1)'(N));
+    
     // ------------------------------------------------------------------------
     // Unpack input vectors
     // ------------------------------------------------------------------------
@@ -286,7 +287,7 @@ module systolic #(
                 // ------------------------------------------------------------
                 if (started) begin
                     cycle_count <= cycle_count + 1'b1;
-                    if (cycle_count == (TOTAL_CYCLES - 1)) begin
+		    if (cycle_count == $clog2(TOTAL_CYCLES+1)'(TOTAL_CYCLES - 1)) begin
                         done_pending <= 1'b1;  // pulse done next cycle
                     end
                 end
