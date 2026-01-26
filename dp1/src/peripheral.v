@@ -259,6 +259,35 @@ module tqvp_example #(
 
     wire _unused = &{ui_in, data_read_n, 1'b0};
 
+// --- SHAWN'S SRAM INTEGRATION ---
+    // Mapping to MMIO addresses:
+    // 0x3E (Weight Buffer) and 0x3F (Data Buffer)
+    wire en_a = (address == 6'h3E); 
+    wire en_b = (address == 6'h3F);
+
+    wire [31:0] rdata_a, rdata_b;
+
+    sram_256kb mem_a (
+        .clk(clk),
+        .reset(!rst_n),      // HL uses active-low reset rst_n
+        .en(en_a),
+        .we(en_a && mmio_wr), 
+        .addr(data_in[15:0]), // Using data_in for testing address indexing
+        .wdata(data_in),
+        .rdata(rdata_a)
+    );
+
+    sram_256kb mem_b (
+        .clk(clk),
+        .reset(!rst_n),
+        .en(en_b),
+        .we(en_b && mmio_wr),
+        .addr(data_in[15:0]),
+        .wdata(data_in),
+        .rdata(rdata_b)
+    );
+
+
 endmodule
 
 `default_nettype wire
