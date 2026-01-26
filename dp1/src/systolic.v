@@ -48,21 +48,24 @@ module systolic #(
     // ------------------------------------------------------------------------
     // Pipes inside the array
     // ------------------------------------------------------------------------
-    reg [31:0] a_pipe   [0:N-1][0:N-1];
+    // Keep ports as unsigned vectors, but make internal storage signed so
+    // signed values are preserved end-to-end (bitwise identical, but helps
+    // avoid accidental unsigned expressions/ternaries).
+    reg signed [31:0] a_pipe   [0:N-1][0:N-1];
     reg        a_vpipe  [0:N-1][0:N-1];
 
-    reg [31:0] b_pipe   [0:N-1][0:N-1];
+    reg signed [31:0] b_pipe   [0:N-1][0:N-1];
     reg        b_vpipe  [0:N-1][0:N-1];
 
-    reg [31:0] acc      [0:N-1][0:N-1];
+    reg signed [31:0] acc      [0:N-1][0:N-1];
 
     // ------------------------------------------------------------------------
     // MACs + forwarding
     // ------------------------------------------------------------------------
-    wire [31:0] mac_result [0:N-1][0:N-1];
+    wire signed [31:0] mac_result [0:N-1][0:N-1];
     wire        mac_done   [0:N-1][0:N-1];
     wire        mac_valid  [0:N-1][0:N-1];
-    wire [31:0] acc_fwd    [0:N-1][0:N-1];
+    wire signed [31:0] acc_fwd    [0:N-1][0:N-1];
 
     genvar r, c;
     generate
@@ -113,10 +116,10 @@ module systolic #(
     // A skew per row (delay by row index)
     // B skew per col (delay by col index)
     // ------------------------------------------------------------------------
-    reg [31:0] a_skew   [0:N-1][0:N-1];
+    reg signed [31:0] a_skew   [0:N-1][0:N-1];
     reg        a_vskew  [0:N-1][0:N-1];
 
-    reg [31:0] b_skew   [0:N-1][0:N-1];
+    reg signed [31:0] b_skew   [0:N-1][0:N-1];
     reg        b_vskew  [0:N-1][0:N-1];
 
     // ------------------------------------------------------------------------

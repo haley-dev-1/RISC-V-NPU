@@ -1,6 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 
+/* verilator lint_off DECLFILENAME */
 module tqvp_example #(
     parameter integer N = 2   // MUST match systolic.v parameter N
 )(
@@ -21,44 +22,68 @@ module tqvp_example #(
 
     output         user_interrupt
 );
+/* verilator lint_on DECLFILENAME */
 
-    // Yosys-friendly small casts for address comparisons
-localparam integer NN = N*N;
-localparam [5:0] N6  = N;
-localparam [5:0] NN6 = NN;
+    localparam integer NN = N*N;
 
+    // Avoid WIDTHTRUNC by explicitly selecting 6 bits from 32-bit ints
+    localparam int unsigned N_INT  = N;
+    localparam int unsigned NN_INT = NN;
+    localparam [5:0] N6  = N_INT[5:0];
+    localparam [5:0] NN6 = NN_INT[5:0];
+
+    // FIFO sizing
+    localparam int FC_W  = (N <= 1) ? 1 : $clog2(N+1);
+    localparam int PTR_W = (N <= 1) ? 1 : $clog2(N);
 
     // --------------------------------------------------------------------
-    // MMIO-visible regs for input vectors
+    // MMIO-visible regs for input lanes (software writes these)
     // --------------------------------------------------------------------
     reg [31:0] a_lane [0:N-1];
     reg [31:0] b_lane [0:N-1];
 
+    // --------------------------------------------------------------------
+    // Beat FIFO (depth N). Each entry stores one beat of A lanes and B lanes.
+    // --------------------------------------------------------------------
+    reg [31:0] a_fifo [0:N-1][0:N-1];  // [beat][lane]
+    reg [31:0] b_fifo [0:N-1][0:N-1];  // [beat][lane]
+    reg [FC_W-1:0]  fifo_count;
+    reg [PTR_W-1:0] rd_ptr;
+    reg [PTR_W-1:0] wr_ptr;
+
+    // Run arming + stream gating:
+    // - We may assert start_pulse early to set systolic busy
+    // - But we HOLD in_valid low until we have queued all N beats
+    //   to avoid bubbles/gaps breaking wavefront timing.
+    reg run_armed;
+    reg stream_en;
+
     // Command pulse
-    reg        start_pulse;
+    reg start_pulse;
 
     // Sticky status
-    reg        done_sticky;
+    reg done_sticky;
 
     // Streaming interface to systolic
-    reg                 in_valid;
-    wire                in_ready;
-
-    wire                sys_busy;
-    wire                sys_done;
+    wire in_ready;
+    wire sys_busy;
+    wire sys_done;
 
     wire [N*32-1:0]      a_vec_in;
     wire [N*32-1:0]      b_vec_in;
     wire [N*N*32-1:0]    c_mat_out;
 
-    // Pack lanes into vectors (lane i at [i*32 +: 32])
+    // Pack the FIFO HEAD (rd_ptr) into vectors
     genvar i;
     generate
         for (i = 0; i < N; i = i + 1) begin : PACK_IN
-            assign a_vec_in[i*32 +: 32] = a_lane[i];
-            assign b_vec_in[i*32 +: 32] = b_lane[i];
+            assign a_vec_in[i*32 +: 32] = a_fifo[rd_ptr][i];
+            assign b_vec_in[i*32 +: 32] = b_fifo[rd_ptr][i];
         end
     endgenerate
+
+    // Gated in_valid presented to systolic
+    wire in_valid = stream_en && (fifo_count != {FC_W{1'b0}});
 
     // Instantiate streaming systolic
     systolic #(.N(N)) u_systolic (
@@ -79,74 +104,149 @@ localparam [5:0] NN6 = NN;
     );
 
     integer k;
+    integer b;
 
-    // Control logic: start pulse + in_valid handshake + sticky done
+    // Convenience wrap helpers (synthesizable)
+    function automatic [PTR_W-1:0] ptr_inc(input [PTR_W-1:0] p);
+        begin
+            if (p == PTR_W'(N-1)) ptr_inc = {PTR_W{1'b0}};
+            else                  ptr_inc = p + {{(PTR_W-1){1'b0}}, 1'b1};
+        end
+    endfunction
+
+    // MMIO decode
+    wire mmio_wr = (data_write_n != 2'b11);
+    wire ctrl_wr = mmio_wr && (address == 6'h20);
+
+    wire push_req = ctrl_wr && data_in[0];
+    wire clr_req  = ctrl_wr && data_in[1];
+
+    // FIFO pop when systolic accepts a beat
+    wire pop_beat = in_valid && in_ready;
+
+    // FIFO push if space and not already streaming (we only support prefill)
+    wire fifo_full = (fifo_count == FC_W'(N));
+    wire do_push   = push_req && !fifo_full && !stream_en;
+
+    // Start pulse when we see the FIRST push of a run while idle.
+    wire first_push_of_run = do_push && !run_armed && !sys_busy;
+
+    // --------------------------------------------------------------------
+    // Sequential
+    // --------------------------------------------------------------------
     always @(posedge clk) begin
         if (!rst_n) begin
             start_pulse <= 1'b0;
-            in_valid    <= 1'b0;
             done_sticky <= 1'b0;
+
+            fifo_count  <= {FC_W{1'b0}};
+            rd_ptr      <= {PTR_W{1'b0}};
+            wr_ptr      <= {PTR_W{1'b0}};
+
+            run_armed   <= 1'b0;
+            stream_en   <= 1'b0;
 
             for (k = 0; k < N; k = k + 1) begin
                 a_lane[k] <= 32'd0;
                 b_lane[k] <= 32'd0;
             end
+            for (b = 0; b < N; b = b + 1) begin
+                for (k = 0; k < N; k = k + 1) begin
+                    a_fifo[b][k] <= 32'd0;
+                    b_fifo[b][k] <= 32'd0;
+                end
+            end
         end else begin
-            // defaults
+            // default
             start_pulse <= 1'b0;
 
-            // latch done sticky when systolic finishes
+            // DONE sticky + auto-clear stream state after completion
             if (sys_done) begin
                 done_sticky <= 1'b1;
+
+                fifo_count <= {FC_W{1'b0}};
+                rd_ptr     <= {PTR_W{1'b0}};
+                wr_ptr     <= {PTR_W{1'b0}};
+                run_armed  <= 1'b0;
+                stream_en  <= 1'b0;
             end
 
-            // drop in_valid when accepted
-            if (in_valid && in_ready) begin
-                in_valid <= 1'b0;
-            end
-
-            // Handle MMIO writes
-            if (data_write_n != 2'b11) begin
+            // Handle lane + CTRL writes
+            if (mmio_wr) begin
                 // A lanes: 0x00..0x00+N-1
                 if (address < (6'h00 + N6)) begin
-		    a_lane[address[0]] <= data_in;
+                    a_lane[address[0]] <= data_in;
                 end
                 // B lanes: 0x10..0x10+N-1
                 else if (address >= 6'h10 && address < (6'h10 + N6)) begin
-		    b_lane[address[0]] <= data_in;
+                    b_lane[address[0]] <= data_in; // 0x10/0x11 -> [0]/[1]
                 end
                 // CTRL
                 else if (address == 6'h20) begin
-                    // bit1 clears sticky status
                     if (data_in[1]) begin
                         done_sticky <= 1'b0;
-                    end
 
-                    // bit0 = START (pulse) and begin streaming
-                    if (data_in[0]) begin
-                        start_pulse <= 1'b1;
-                        in_valid    <= 1'b1;
+                        // Clear queued beats / state
+                        fifo_count <= {FC_W{1'b0}};
+                        rd_ptr     <= {PTR_W{1'b0}};
+                        wr_ptr     <= {PTR_W{1'b0}};
+                        run_armed  <= 1'b0;
+                        stream_en  <= 1'b0;
                     end
                 end
+            end
+
+            // Skip FIFO update if we just cleared or just finished (avoid overrides)
+            if (!clr_req && !sys_done) begin : FIFO_UPDATE
+                int unsigned count_next;
+                count_next = int'(fifo_count);
+
+                if (pop_beat) begin
+                    rd_ptr     <= ptr_inc(rd_ptr);
+                    count_next = count_next - 1;
+                end
+
+                if (do_push) begin
+                    for (k = 0; k < N; k = k + 1) begin
+                        a_fifo[wr_ptr][k] <= a_lane[k];
+                        b_fifo[wr_ptr][k] <= b_lane[k];
+                    end
+                    wr_ptr     <= ptr_inc(wr_ptr);
+                    count_next = count_next + 1;
+
+                    if (first_push_of_run) begin
+                        run_armed   <= 1'b1;
+                        start_pulse <= 1'b1;
+                    end
+                end
+
+                // Enable streaming only once we have queued ALL N beats
+                if (run_armed && !stream_en && (count_next == int'(N))) begin
+                    stream_en <= 1'b1;
+                end
+
+                fifo_count <= count_next[FC_W-1:0];
             end
         end
     end
 
+    // --------------------------------------------------------------------
     // Read mux
+    // --------------------------------------------------------------------
     wire [31:0] status_word = {29'd0, 1'b0, sys_busy, done_sticky};
 
     reg [31:0] c_word;
     integer idx;
 
-always @(*) begin
-    c_word = 32'd0;
-    idx = 0;
-    if (address >= 6'h30 && address < (6'h30 + NN6)) begin
-        idx = address - 6'h30;       // idx is integer, this is fine
-        c_word = c_mat_out[idx*32 +: 32];
-    end
-end
+    always @(*) begin
+        c_word = 32'd0;
+        idx = 0;
 
+        if (address >= 6'h30 && address < (6'h30 + NN6)) begin
+            idx = {26'd0, address} - 32'd48;  // 0x30 = 48
+            c_word = c_mat_out[idx*32 +: 32];
+        end
+    end
 
     assign data_out =
         (address == 6'h21) ? status_word :

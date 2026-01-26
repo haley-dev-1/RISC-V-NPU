@@ -28,18 +28,27 @@ module tb_mac;
     .done  (done)
   );
 
-  // Expected result model (matches your RTL: unsigned math + truncation to 32 bits)
-  function automatic logic [31:0] expected_wrap32(
+  // Expected result model (matches RTL: signed a/b/acc, 64-bit intermediates,
+  // and truncation/wrap to 32 bits).
+  function automatic logic [31:0] expected_wrap32_signed(
     input logic [31:0] aa,
     input logic [31:0] bb,
     input logic [31:0] accc
   );
-    logic [63:0] prod;
-    logic [63:0] sum64;
+    longint signed prod_s;
+    longint signed sum_s;
+    logic dummy;
     begin
-      prod  = aa * bb;
-      sum64 = prod + {32'b0, accc};
-      expected_wrap32 = sum64[31:0];
+      prod_s = $signed(aa) * $signed(bb);
+
+      // Explicit sign-extension to 64b avoids Verilator WIDTHEXPAND warnings
+      sum_s  = prod_s + {{32{accc[31]}}, accc};
+
+      // Touch upper bits so Verilator doesn't warn about unused [63:32]
+      dummy = ^sum_s[63:32];
+      if (dummy) begin end
+
+      expected_wrap32_signed = sum_s[31:0]; // wrap modulo 2^32
     end
   endfunction
 
@@ -51,7 +60,7 @@ module tb_mac;
   );
     logic [31:0] exp;
     begin
-      exp = expected_wrap32(aa, bb, accc);
+      exp = expected_wrap32_signed(aa, bb, accc);
 
       // Drive inputs before compute edge
       @(negedge clk);
@@ -103,14 +112,23 @@ module tb_mac;
     @(posedge clk);
     if (!rst_n) $fatal(1, "Reset still low unexpectedly.");
 
-    // Directed tests
-    apply_and_check(32'd2, 32'd3, 32'd4);            // 2*3+4=10
-    apply_and_check(32'd0, 32'hDEADBEEF, 32'd123);   // 0*b+acc=acc
-    apply_and_check(32'hFFFF_FFFF, 32'd2, 32'd0);    // wraparound
-    apply_and_check(32'h8000_0000, 32'd2, 32'd1);    // overflow + acc
+    // Directed tests (signed)
+    apply_and_check(32'sd2,   32'sd3,   32'sd4);              // 2*3+4=10
+    apply_and_check(32'sd0,   32'sd12345, -32'sd7);           // 0*b+acc=acc
+    apply_and_check(-32'sd2,  32'sd3,   32'sd4);              // -2*3+4=-2
+    apply_and_check(-32'sd2,  -32'sd3,  32'sd4);              // (-2)*(-3)+4=10
+    apply_and_check(32'sd7,   -32'sd8,  32'sd1);              // 7*-8+1=-55
 
-    // Random tests
-    for (int i = 0; i < 200; i++) begin
+    // Edge cases
+    apply_and_check(32'sd1,   32'sd1,   32'sd0);
+    apply_and_check(-32'sd1,  32'sd1,   32'sd0);
+    apply_and_check(-32'sd1,  -32'sd1,  32'sd0);
+    apply_and_check(32'sh7FFF_FFFF, 32'sd2, 32'sd0);          // INT_MAX*2
+    apply_and_check(32'sh8000_0000, 32'sd2, 32'sd1);          // INT_MIN*2+1
+    apply_and_check(32'sh8000_0000, 32'sh8000_0000, 32'sd0);  // INT_MIN*INT_MIN
+
+    // Random tests (>= 200 vectors)
+    for (int i = 0; i < 500; i++) begin
       apply_and_check($urandom(), $urandom(), $urandom());
     end
 

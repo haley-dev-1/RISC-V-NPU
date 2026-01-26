@@ -6,14 +6,14 @@
  *
  * Testbench for systolic.v (wavefront streaming systolic array).
  *
- * This testbench is written to be friendly for Verilator:
+ * Verilator-friendly:
  *  - Drive signals on negedge so they are stable before posedge sampling.
- *  - Check outputs after the DUT has had time to update registered signals
- *    (we often check at negedge after an event).
+ *  - Check outputs after the DUT has had time to update registered signals.
  *
  * What we test:
- *  - A simple 2x2 matrix multiply using the streaming wavefront schedule.
- *  - A few random tests (still 2x2 by default) to catch surprises.
+ *  - 2x2 matrix multiply using the streaming wavefront schedule.
+ *  - Signed correctness with a directed negative test.
+ *  - Random tests to catch surprises.
  */
 
 module tb_systolic;
@@ -56,21 +56,27 @@ module tb_systolic;
   );
 
   // --------------------------
-  // Helper functions: wraparound 32-bit math (matches your unsigned MAC)
+  // Helper function: 32-bit signed MAC wraparound (matches mac.v behavior)
   // --------------------------
-  function automatic logic [31:0] add_wrap32(input logic [31:0] x, input logic [31:0] y);
-    logic [63:0] sum64;
+  function automatic logic [31:0] mac_wrap32_signed(
+    input logic [31:0] x,
+    input logic [31:0] y,
+    input logic [31:0] acc_in
+  );
+    longint signed prod_s;
+    longint signed sum_s;
+    logic dummy;
     begin
-      sum64 = {32'b0, x} + {32'b0, y};
-      add_wrap32 = sum64[31:0];
-    end
-  endfunction
+      prod_s = $signed(x) * $signed(y);
 
-  function automatic logic [31:0] mul_wrap32(input logic [31:0] x, input logic [31:0] y);
-    logic [63:0] prod64;
-    begin
-      prod64 = {32'b0, x} * {32'b0, y};
-      mul_wrap32 = prod64[31:0];
+      // Explicit sign-extension to 64b avoids Verilator WIDTHEXPAND warnings
+      sum_s  = prod_s + {{32{acc_in[31]}}, acc_in};
+
+      // Touch upper bits so Verilator doesn't warn about unused [63:32]
+      dummy = ^sum_s[63:32];
+      if (dummy) begin end
+
+      mac_wrap32_signed = sum_s[31:0]; // wrap modulo 2^32
     end
   endfunction
 
@@ -80,27 +86,23 @@ module tb_systolic;
     input  logic [31:0] B00, B01, B10, B11,
     output logic [31:0] C00, C01, C10, C11
   );
-    logic [31:0] t0, t1;
+    logic [31:0] t0;
     begin
       // C00 = A00*B00 + A01*B10
-      t0  = mul_wrap32(A00, B00);
-      t1  = mul_wrap32(A01, B10);
-      C00 = add_wrap32(t0, t1);
+      t0  = mac_wrap32_signed(A00, B00, 32'd0);
+      C00 = mac_wrap32_signed(A01, B10, t0);
 
       // C01 = A00*B01 + A01*B11
-      t0  = mul_wrap32(A00, B01);
-      t1  = mul_wrap32(A01, B11);
-      C01 = add_wrap32(t0, t1);
+      t0  = mac_wrap32_signed(A00, B01, 32'd0);
+      C01 = mac_wrap32_signed(A01, B11, t0);
 
       // C10 = A10*B00 + A11*B10
-      t0  = mul_wrap32(A10, B00);
-      t1  = mul_wrap32(A11, B10);
-      C10 = add_wrap32(t0, t1);
+      t0  = mac_wrap32_signed(A10, B00, 32'd0);
+      C10 = mac_wrap32_signed(A11, B10, t0);
 
       // C11 = A10*B01 + A11*B11
-      t0  = mul_wrap32(A10, B01);
-      t1  = mul_wrap32(A11, B11);
-      C11 = add_wrap32(t0, t1);
+      t0  = mac_wrap32_signed(A10, B01, 32'd0);
+      C11 = mac_wrap32_signed(A11, B11, t0);
     end
   endtask
 
@@ -124,6 +126,9 @@ module tb_systolic;
   );
     logic [31:0] expC00, expC01, expC10, expC11;
     begin
+      // Reference busy so Verilator doesn't warn it's unused
+      if (busy === 1'bx) $fatal(1, "busy is X");
+
       compute_expected_2x2(A00, A01, A10, A11, B00, B01, B10, B11,
                            expC00, expC01, expC10, expC11);
 
@@ -153,7 +158,6 @@ module tb_systolic;
       b_vec_in[0*32 +: 32] = B00;  // row 0, col 0
       b_vec_in[1*32 +: 32] = B01;  // row 0, col 1
 
-      // Wait for acceptance (in_ready should be high)
       @(posedge clk);
 
       // Beat 1
@@ -178,7 +182,7 @@ module tb_systolic;
         @(posedge clk);
       end
 
-      // Check after updates settle (negedge after done asserted)
+      // Check after updates settle
       @(negedge clk);
 
       if (c_at(0) !== expC00) $fatal(1, "C00 mismatch: expected=%h got=%h", expC00, c_at(0));
@@ -188,9 +192,6 @@ module tb_systolic;
     end
   endtask
 
-  // --------------------------
-  // Test sequence
-  // --------------------------
   initial begin
     // init
     rst_n    = 1'b0;
@@ -204,18 +205,16 @@ module tb_systolic;
     rst_n = 1'b1;
     @(posedge clk);
 
-    // Directed test (easy to verify)
-    // A = [ [1,2],
-    //       [3,4] ]
-    // B = [ [5,6],
-    //       [7,8] ]
-    // C = A*B = [ [19,22],
-    //             [43,50] ]
+    // Directed test
     run_one_2x2_case(32'd1, 32'd2, 32'd3, 32'd4,
                      32'd5, 32'd6, 32'd7, 32'd8);
 
-    // A few random tests
-    for (int k = 0; k < 50; k++) begin
+    // Directed signed test with negatives (note: negatives are -32'sdX)
+    run_one_2x2_case(-32'sd1, 32'sd2, 32'sd3, -32'sd4,
+                     32'sd5, -32'sd6, -32'sd7, 32'sd8);
+
+    // Random tests
+    for (int k = 0; k < 100; k++) begin
       run_one_2x2_case($urandom(), $urandom(), $urandom(), $urandom(),
                        $urandom(), $urandom(), $urandom(), $urandom());
     end
