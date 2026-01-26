@@ -1,2 +1,0 @@
-Vtb_peripheral___024root__Slow.o: Vtb_peripheral___024root__Slow.cpp \
- Vtb_peripheral__pch.h Vtb_peripheral__Syms.h Vtb_peripheral___024root.h

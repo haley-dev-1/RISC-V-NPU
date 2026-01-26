@@ -1,3 +1,0 @@
-Vtb_peripheral___024root__DepSet_ha87028d9__0.o: \
- Vtb_peripheral___024root__DepSet_ha87028d9__0.cpp Vtb_peripheral__pch.h \
- Vtb_peripheral__Syms.h Vtb_peripheral___024root.h
