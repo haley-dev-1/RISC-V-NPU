@@ -1,86 +1,165 @@
 /*
- * Copyright (c) 2025 Your Name
- * SPDX-License-Identifier: Apache-2.0
+ * tinyQV NPU peripheral integration
+ *
+ * LLM-generated peripheral: MMIO bridge + tinyQV_top + internal memory model.
  */
 
 `default_nettype none
 
-// Change the name of this module to something that reflects its functionality and includes your name for uniqueness
-// For example tqvp_yourname_spi for an SPI peripheral.
-// Then edit tt_wrapper.v line 41 and change tqvp_example to your chosen module name.
-module tqvp_example (
-    input         clk,          // Clock - the TinyQV project clock is normally set to 64MHz.
-    input         rst_n,        // Reset_n - low to reset.
+module tqvp_npu (
+    input         clk,
+    input         rst_n,
 
-    input  [7:0]  ui_in,        // The input PMOD, always available.  Note that ui_in[7] is normally used for UART RX.
-                                // The inputs are synchronized to the clock, note this will introduce 2 cycles of delay on the inputs.
+    input  [7:0]  ui_in,
+    output [7:0]  uo_out,
 
-    output [7:0]  uo_out,       // The output PMOD.  Each wire is only connected if this peripheral is selected.
-                                // Note that uo_out[0] is normally used for UART TX.
+    input  [5:0]  address,
+    input  [31:0] data_in,
 
-    input [5:0]   address,      // Address within this peripheral's address space
-    input [31:0]  data_in,      // Data in to the peripheral, bottom 8, 16 or all 32 bits are valid on write.
+    input  [1:0]  data_write_n,
+    input  [1:0]  data_read_n,
 
-    // Data read and write requests from the TinyQV core.
-    input [1:0]   data_write_n, // 11 = no write, 00 = 8-bits, 01 = 16-bits, 10 = 32-bits
-    input [1:0]   data_read_n,  // 11 = no read,  00 = 8-bits, 01 = 16-bits, 10 = 32-bits
-    
-    output [31:0] data_out,     // Data out from the peripheral, bottom 8, 16 or all 32 bits are valid on read when data_ready is high.
+    output [31:0] data_out,
     output        data_ready,
 
-    output        user_interrupt  // Dedicated interrupt request for this peripheral
+    output        user_interrupt
 );
 
-    // Implement a 32-bit read/write register at address 0
-    reg [31:0] example_data;
+    localparam MEM_WORDS = 1024;
+    localparam MEM_BYTES = MEM_WORDS * 4;
+    localparam ADDR_BITS = 10; // log2(1024)
+
+    // MMIO bridge signals
+    wire        npu_start;
+    wire        npu_abort;
+    wire [31:0] src_desc_ptr;
+    wire [31:0] dst_desc_ptr;
+    wire [31:0] control;
+    wire [4:0]  opcode;
+    wire [7:0]  qparam;
+
+    wire        npu_busy;
+    wire        npu_done;
+    wire        npu_error;
+    wire        dma_busy;
+
+    // System memory interface
+    wire        mem_rd_req;
+    wire [31:0] mem_rd_addr;
+    wire        mem_rd_ready;
+    wire        mem_rd_valid;
+    wire [31:0] mem_rd_data;
+
+    wire        mem_wr_req;
+    wire [31:0] mem_wr_addr;
+    wire [31:0] mem_wr_data;
+    wire        mem_wr_ready;
+
+    // Internal memory model
+    reg [31:0] mem [0:MEM_WORDS-1];
+    reg        rd_pending;
+    reg [ADDR_BITS-1:0] rd_addr_q;
+    reg        mem_rd_valid_r;
+    reg [31:0] mem_rd_data_r;
+
+    assign mem_rd_ready = !rd_pending;
+    assign mem_rd_valid = mem_rd_valid_r;
+    assign mem_rd_data  = mem_rd_data_r;
+    assign mem_wr_ready = 1'b1;
+
     always @(posedge clk) begin
         if (!rst_n) begin
-            example_data <= 0;
+            rd_pending     <= 1'b0;
+            mem_rd_valid_r <= 1'b0;
+            mem_rd_data_r  <= 32'd0;
+            rd_addr_q      <= {ADDR_BITS{1'b0}};
         end else begin
-            if (address == 6'h0) begin
-                if (data_write_n != 2'b11)              example_data[7:0]   <= data_in[7:0];
-                if (data_write_n[1] != data_write_n[0]) example_data[15:8]  <= data_in[15:8];
-                if (data_write_n == 2'b10)              example_data[31:16] <= data_in[31:16];
+            mem_rd_valid_r <= 1'b0;
+            if (rd_pending) begin
+                mem_rd_valid_r <= 1'b1;
+                mem_rd_data_r  <= mem[rd_addr_q];
+                rd_pending     <= 1'b0;
+            end
+
+            if (mem_rd_req && mem_rd_ready) begin
+                rd_addr_q  <= mem_rd_addr[ADDR_BITS+1:2];
+                rd_pending <= 1'b1;
+            end
+
+            if (mem_wr_req && mem_wr_ready) begin
+                mem[mem_wr_addr[ADDR_BITS+1:2]] <= mem_wr_data;
             end
         end
     end
 
-    // The bottom 8 bits of the stored data are added to ui_in and output to uo_out.
-    assign uo_out = example_data[7:0] + ui_in;
+    // MMIO bridge
+    npu_if_bridge #(
+        .MEM_BASE(32'h0000_0000),
+        .MEM_SIZE(MEM_BYTES)
+    ) bridge (
+        .clk(clk),
+        .rst_n(rst_n),
+        .address(address),
+        .data_in(data_in),
+        .data_write_n(data_write_n),
+        .data_read_n(data_read_n),
+        .data_out(data_out),
+        .data_ready(data_ready),
+        .user_interrupt(user_interrupt),
+        .npu_start(npu_start),
+        .npu_abort(npu_abort),
+        .src_desc_ptr(src_desc_ptr),
+        .dst_desc_ptr(dst_desc_ptr),
+        .control(control),
+        .opcode(opcode),
+        .qparam(qparam),
+        .npu_busy(npu_busy),
+        .npu_done(npu_done),
+        .npu_error(npu_error),
+        .dma_busy(dma_busy)
+    );
 
-    // Address 0 reads the example data register.  
-    // Address 4 reads ui_in
-    // All other addresses read 0.
-    assign data_out = (address == 6'h0) ? example_data :
-                      (address == 6'h4) ? {24'h0, ui_in} :
-                      32'h0;
+    // NPU top
+    tinyQV_top #(
+        .N(4),
+        .DATA_W(16),
+        .ACC_W(32),
+        .BUF_DEPTH(128),
+        .BUF_AW(7)
+    ) npu (
+        .clk(clk),
+        .rst_n(rst_n),
+        .start(npu_start),
+        .abort(npu_abort),
+        .opcode(opcode),
+        .qparam(qparam),
+        .control(control),
+        .src_desc_ptr(src_desc_ptr),
+        .dst_desc_ptr(dst_desc_ptr),
+        .mem_rd_req(mem_rd_req),
+        .mem_rd_addr(mem_rd_addr),
+        .mem_rd_ready(mem_rd_ready),
+        .mem_rd_valid(mem_rd_valid),
+        .mem_rd_data(mem_rd_data),
+        .mem_wr_req(mem_wr_req),
+        .mem_wr_addr(mem_wr_addr),
+        .mem_wr_data(mem_wr_data),
+        .mem_wr_ready(mem_wr_ready),
+        .dma_busy(dma_busy),
+        .busy(npu_busy),
+        .done(npu_done),
+        .error(npu_error)
+    );
 
-    // All reads complete in 1 clock
-    assign data_ready = 1;
-    
-    // User interrupt is generated on rising edge of ui_in[6], and cleared by writing a 1 to the low bit of address 8.
-    reg example_interrupt;
-    reg last_ui_in_6;
+    // Debug outputs
+    assign uo_out[0] = npu_busy;
+    assign uo_out[1] = npu_done;
+    assign uo_out[2] = npu_error;
+    assign uo_out[3] = dma_busy;
+    assign uo_out[7:4] = opcode[3:0];
 
-    always @(posedge clk) begin
-        if (!rst_n) begin
-            example_interrupt <= 0;
-        end
-
-        if (ui_in[6] && !last_ui_in_6) begin
-            example_interrupt <= 1;
-        end else if (address == 6'h8 && data_write_n != 2'b11 && data_in[0]) begin
-            example_interrupt <= 0;
-        end
-
-        last_ui_in_6 <= ui_in[6];
-    end
-
-    assign user_interrupt = example_interrupt;
-
-    // List all unused inputs to prevent warnings
-    // data_read_n is unused as none of our behaviour depends on whether
-    // registers are being read.
-    wire _unused = &{data_read_n, 1'b0};
+    wire _unused = &{ui_in, 1'b0};
 
 endmodule
+
+`default_nettype wire
