@@ -2,5 +2,5 @@ read_verilog -sv src/tt_wrapper.v
 read_verilog -sv src/peripheral.v
 read_verilog -sv src/test_harness/*.sv
 
-synth -top tt_um_tqv_peripheral_harness
+synth -top tt_wrapper
 write_json wrapper.json
