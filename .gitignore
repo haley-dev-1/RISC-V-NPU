@@ -18,6 +18,7 @@ tmp/
 logs/
 sby/
 *.log
+*.vcd
 
 # OS/editor
 .DS_Store
