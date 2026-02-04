@@ -1,4 +1,6 @@
 # RISC-V-NPU
+# Branch for DP1
+
 AI Hardware Design League (AI-HDL) competition repository for integrating an NPU co-processor/extension onto a base RISC-V CPU.
 
 # Competition rules
