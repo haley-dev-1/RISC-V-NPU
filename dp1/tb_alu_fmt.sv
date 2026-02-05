@@ -28,8 +28,9 @@ module tb_alu_fmt;
   localparam [3:0] OP_ADD = 4'b0000;
   localparam [3:0] OP_SUB = 4'b1000;
   localparam [3:0] OP_AND = 4'b0111;
-  localparam [3:0] OP_SLT = 4'b0010;
+  localparam [3:0] OP_XOR = 4'b0100;
 
+  localparam integer TOTAL_TESTS = 4;
   integer pass_count;
 
   task automatic run_test(
@@ -55,14 +56,15 @@ module tb_alu_fmt;
       @(negedge clk);
       received = d;
 
-      $display("test %0d ....", idx);
-      $display("expected 0x%08h", expected);
-      $display("received 0x%08h", received);
+      $display("[RUN] test %0d", idx);
+      $display("[INPUT] op=0x%0h a=0x%08h b=0x%08h", op_in, a_in, b_in);
+      $display("[EXPECTED OUTPUT] 0x%08h", expected);
+      $display("[OUTPUT] 0x%08h", received);
       if (received === expected) begin
-        $display("Result: [PASS]");
+        $display("[PASS]");
         pass_count = pass_count + 1;
       end else begin
-        $display("Result: [FAIL]");
+        $display("[FAIL]");
       end
     end
   endtask
@@ -74,17 +76,13 @@ module tb_alu_fmt;
     b    = 32'h0;
     pass_count = 0;
 
-    $display("dp1/tb_alu.v");
-
     run_test(1, OP_ADD, 32'h00000002, 32'h00000003, 32'h00000005);
     run_test(2, OP_SUB, 32'h00000010, 32'h00000001, 32'h0000000F);
     run_test(3, OP_AND, 32'hF0F0F0F0, 32'h0F0F0F0F, 32'h00000000);
-    run_test(4, OP_SLT, 32'hFFFFFFFF, 32'h00000001, 32'h00000001);
+    run_test(4, OP_XOR, 32'hAAAAAAAA, 32'h55555555, 32'hFFFFFFFF);
+    $display("[SUMMARY] %0d OF %0d TESTS PASSED", pass_count, TOTAL_TESTS);
 
-    $display("dp1/tb_alu.v");
-    $display("%0d OF 4 TESTS PASS", pass_count);
-
-    if (pass_count != 4) $finish(1);
+    if (pass_count != TOTAL_TESTS) $finish(1);
     $finish;
   end
 

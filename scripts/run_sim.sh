@@ -7,12 +7,78 @@ VCD="$ROOT/trace.vcd"
 
 rm -f "$LOG" "$VCD"
 
+any_fail=0
+pass_count=0
+test_count=0
+declare -a TEST_NAMES
+declare -a TEST_STATUS
+
+filter_output() {
+  # Hide simulator noise: $finish backtraces and VCD info lines
+  sed -E \
+    -e '/VCD info: /d' \
+    -e '/\$finish/d' \
+    -e '/[Ff]inish called/d'
+}
+
+allow_output() {
+  # Keep only bracketed lines for clean console output
+  grep -E '^\[(RUN|INPUT|EXPECTED OUTPUT|OUTPUT|PASS|FAIL|SUMMARY)\]'
+}
+
+detect_fail() {
+  # Detect common FAIL markers in testbench output
+  grep -q -E 'Result: \\[FAIL\\]|\\[FAIL\\]|FAIL:'
+}
+
+record_result() {
+  local name="$1"
+  local status="$2"
+  TEST_NAMES+=("$name")
+  TEST_STATUS+=("$status")
+  test_count=$((test_count + 1))
+  if [ "$status" = "PASS" ]; then
+    pass_count=$((pass_count + 1))
+  else
+    any_fail=1
+  fi
+}
+
+print_results() {
+  printf "\n[RESULTS]\n"
+  printf "%-20s %s\n" "TEST" "STATUS"
+  local i
+  for i in "${!TEST_NAMES[@]}"; do
+    printf "%-20s %s\n" "${TEST_NAMES[$i]}" "${TEST_STATUS[$i]}"
+  done
+  printf "[SUMMARY] %d OF %d TESTS PASSED\n" "$pass_count" "$test_count"
+}
+
 run_test() {
   local name="$1"
   shift
   echo "[RUN] $name" | tee -a "$LOG"
   iverilog -g2012 -s "$name" -o "/tmp/${name}.out" "$@" >>"$LOG" 2>&1
-  vvp "/tmp/${name}.out" >>"$LOG" 2>&1
+  set +e
+  local out
+  out=$(vvp "/tmp/${name}.out" 2>&1)
+  local rc=$?
+  set -e
+
+  local filtered cleaned status
+  filtered=$(printf "%s\n" "$out" | filter_output)
+  cleaned=$(printf "%s\n" "$filtered" | allow_output || true)
+  printf "%s\n" "$cleaned" >>"$LOG"
+  if [ -n "$cleaned" ]; then
+    printf "%s\n" "$cleaned"
+  fi
+
+  status="PASS"
+  if [ $rc -ne 0 ] || printf "%s\n" "$out" | detect_fail; then
+    status="FAIL"
+  fi
+  record_result "$name" "$status"
+  echo "[$status] $name"
 }
 
 run_verilator() {
@@ -20,7 +86,26 @@ run_verilator() {
   shift
   echo "[RUN] $name (verilator)" | tee -a "$LOG"
   verilator --binary -sv --timing -Wno-fatal --top-module "$name" --Mdir "/tmp/obj_${name}" -o "/tmp/${name}_sim" "$@" >>"$LOG" 2>&1
-  "/tmp/${name}_sim" >>"$LOG" 2>&1
+  set +e
+  local out
+  out=$("/tmp/${name}_sim" 2>&1)
+  local rc=$?
+  set -e
+
+  local filtered cleaned status
+  filtered=$(printf "%s\n" "$out" | filter_output)
+  cleaned=$(printf "%s\n" "$filtered" | allow_output || true)
+  printf "%s\n" "$cleaned" >>"$LOG"
+  if [ -n "$cleaned" ]; then
+    printf "%s\n" "$cleaned"
+  fi
+
+  status="PASS"
+  if [ $rc -ne 0 ] || printf "%s\n" "$out" | detect_fail; then
+    status="FAIL"
+  fi
+  record_result "$name" "$status"
+  echo "[$status] $name"
 }
 
 # Existing DP1 self-checking testbenches (unchanged)
@@ -51,6 +136,12 @@ run_verilator tb_dma \
   "$ROOT/dp1/src/peripheral.v" \
   "$ROOT/dp1/testbench/tb_dma.sv"
 
+# Formatted ALU test output
+run_test tb_alu_fmt \
+  "$ROOT/dp1/alu.v" \
+  "$ROOT/dp1/tb_alu.v" \
+  "$ROOT/dp1/tb_alu_fmt.sv"
+
 # New DMA + E2E NPU tests
 run_test dma_unit_tb \
   "$ROOT/hw/npu/dual_dma.v" \
@@ -66,9 +157,13 @@ run_test e2e_npu_tb \
   "$ROOT/hw/npu/tinyQV_top.v" \
   "$ROOT/tb/e2e_npu_tb.v"
 
+print_results | tee -a "$LOG"
+
 if [ ! -f "$VCD" ]; then
   echo "trace.vcd not produced by tests" | tee -a "$LOG"
-  exit 1
+  any_fail=1
 fi
 
-echo "All tests passed." | tee -a "$LOG"
+if [ "$any_fail" -ne 0 ]; then
+  exit 1
+fi

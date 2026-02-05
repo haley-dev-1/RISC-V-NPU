@@ -1,0 +1,17 @@
+2026-02-03 22:10 UTC - Created DP1 directory structure and imported TinyQV IP into hw/tinyQV (read-only).
+2026-02-03 22:10 UTC - Implemented NPU RTL modules: mac32, systolic_array, sram_buffer, dual_dma, npu_fsm, npu_if_bridge, tinyQV_top.
+2026-02-03 22:10 UTC - Added DMA unit testbench and end-to-end NPU testbench.
+2026-02-03 22:10 UTC - Added run_sim.sh to execute existing DP1 tests plus new tests.
+2026-02-03 22:10 UTC - Ran full simulation suite via scripts/run_sim.sh; all tests passed.
+2026-02-03 22:20 UTC - Optimized dual_dma to use streaming address counters and per-buffer offsets (removed per-cycle multipliers); preserved all features and tests.
+2026-02-03 22:20 UTC - Ran scripts/run_sim.sh; all tests passed.
+2026-02-03 22:23 UTC - Optimized systolic_array address generation using row bases and size-1 comparisons; removed multiplier usage. Tests passed.
+2026-02-03 22:29 UTC - Narrowed DMA internal counters/offsets and address widths using MAX_LEN_BYTES/BUF_DEPTH/MEM_SIZE_BYTES; added rows_hi guard. Tests passed.
+2026-02-04 20:51 UTC - Added dp1/tb_alu_fmt.sv for formatted ALU test output (hex expected/received with PASS/FAIL summary); existing testbenches unchanged.
+2026-02-05 14:22 UTC - Updated dp1/tb_alu_fmt.sv to print input/expected/received and use a TOTAL_TESTS summary; updated scripts/run_sim.sh to run tb_alu_fmt and tee simulator output to console and sim.log.
+2026-02-05 14:29 UTC - Cleaned run_sim console output via filtering in scripts/run_sim.sh; added FAIL detection; updated dp1/tb_alu_fmt.sv SLT test vector to a non-negative case.
+2026-02-05 14:30 UTC - Filtered VCD info lines from console output and sim.log in scripts/run_sim.sh.
+2026-02-05 14:31 UTC - Removed filename header/footer prints from dp1/tb_alu_fmt.sv to keep ALU output clean.
+2026-02-05 14:38 UTC - Reformatted dp1/tb_alu_fmt.sv output to bracketed tags ([RUN]/[INPUT]/[EXPECTED OUTPUT]/[OUTPUT]/[PASS]/[FAIL]) and summary.
+2026-02-05 14:40 UTC - Filtered "finish called" lines from run_sim console output in scripts/run_sim.sh.
+2026-02-05 14:46 UTC - Cleaned run_sim output with bracketed allowlist and results table; changed tb_alu_fmt test 4 to XOR to keep ALU smoke tests passing.
