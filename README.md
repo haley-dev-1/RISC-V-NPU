@@ -1,4 +1,9 @@
 
+**Judges: Key Reference Links**
+```text
+https://docs.google.com/document/d/1fmhlXuitneP1_QLHoUi4qJp5SmYvQRe2-L5NwytaKU8/edit?tab=t.0
+https://docs.google.com/document/d/1MtwKv0zdN_xzchfFwy2aWpOYBHnxKtnMZWzyLQlBIf4/edit?tab=t.0
+```
 
 # AI-HDL - RISC-V-NPU
 AI Hardware Design League (AI-HDL) competition repository for integrating an NPU co-processor/extension onto a base RISC-V CPU.
