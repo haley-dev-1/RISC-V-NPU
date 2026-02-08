@@ -1,0 +1,11 @@
+read_verilog -sv \
+  project/dp1/src/mac.v \
+  project/dp1/src/systolic.v \
+  project/dp1/src/dma.v \
+  project/dp1/src/sram_buffer.sv \
+  project/dp1/src/peripheral.v
+
+hierarchy -check -top tqvp_example
+synth -top tqvp_example
+stat
+write_json project/dp1/synth.json
