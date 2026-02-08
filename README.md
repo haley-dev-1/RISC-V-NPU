@@ -5,10 +5,10 @@ https://docs.google.com/document/d/1fmhlXuitneP1_QLHoUi4qJp5SmYvQRe2-L5NwytaKU8/
 https://docs.google.com/document/d/1MtwKv0zdN_xzchfFwy2aWpOYBHnxKtnMZWzyLQlBIf4/edit?tab=t.0
 ```
 
+**Use `SETUP.md` and `RUNME.sh` (setup is for prereqs, `RUNME.sh` is for testing the modules).**
+
 # AI-HDL - RISC-V-NPU
 AI Hardware Design League (AI-HDL) competition repository for integrating an NPU co-processor/extension onto a base RISC-V CPU.
-
-**Use `SETUP.md` and `RUNME.sh` (setup is for prereqs, `RUNME.sh` is for testing the modules).**
 
 # Competition rules
 - we do not modify any of the RISC-V CPU verilog modules
