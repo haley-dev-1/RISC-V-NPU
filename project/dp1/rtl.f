@@ -1,0 +1,15 @@
+hw/npu/dual_dma.v
+hw/npu/mac32.v
+hw/npu/npu_fsm.v
+hw/npu/npu_if_bridge.v
+hw/npu/sram_buffer.v
+hw/npu/systolic_array.v
+hw/npu/tinyQV_core.v
+hw/npu/tinyQV_top.v
+src/peripheral.v
+src/test_harness/falling_edge_detector.sv
+src/test_harness/reclocking.sv
+src/test_harness/rising_edge_detector.sv
+src/test_harness/spi_reg.sv
+src/test_harness/synchronizer.sv
+src/tt_wrapper.v

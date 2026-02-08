@@ -671,3 +671,172 @@ Existing testbenches preserved unchanged:
 - `dp1/tb_*.v` (cocotb harnesses)
 - `tb/dma_unit_tb.v`
 - `tb/e2e_npu_tb.v`
+
+Iteration 13 - 2026-02-08 00:00 UTC
+
+Goal:
+Add a standalone DMA module in `dp1/src` with a Verilator-ready unit testbench in `dp1/testbench`, and integrate DMA into the peripheral while keeping tt_wrapper synthesis flow intact.
+
+Context:
+User requested all work to live in `dp1/src` and `dp1/testbench`, with a standalone DMA module (`dma.v`) that is also used by the peripheral.
+
+Prompt Sent:
+"yeah i need a standalone DMA module dma.v within aihdl/src, so add that. It must be compatible with a standalone testbench, too, so create that in /testbench for verilator verification. Of course this should be within peripheral, too. And, at the end of the day, peripheral must integrate into tt_wrapper such that it can be synthesized and PPA analysis"
+
+LLM Output:
+- Added `dp1/src/dma.v` with parameterized bounds checks and per-channel start/done/error/indices.
+- Integrated `dma.v` into `dp1/src/peripheral.v`, replacing inlined DMA control/state and keeping MMIO behavior.
+- Added standalone Verilator unit testbench `dp1/testbench/tb_dma_unit.sv` that verifies A/B/out transfers and invalid-length error handling.
+
+Tests Run:
+- Not run (user did not request).
+
+Results:
+- Not run.
+
+Assumptions:
+- DMA operates at one word per cycle with no backpressure for the unit test.
+- Peripheral MMIO behavior remains compatible with existing tb_dma flow.
+
+Tradeoffs:
+- DMA module uses index/fire signals and relies on peripheral for memory writes to keep memories centralized.
+
+Next Steps:
+- Run Verilator on `dp1/testbench/tb_dma_unit.sv` including `dp1/src/dma.v`.
+- Re-run existing peripheral testbenches with `dp1/src/dma.v` in the compile list.
+
+TinyQV files treated as read-only:
+- `hw/tinyQV/alu.v`
+- `hw/tinyQV/core.v`
+- `hw/tinyQV/counter.v`
+- `hw/tinyQV/cpu.v`
+- `hw/tinyQV/decode.v`
+- `hw/tinyQV/latch_reg.v`
+- `hw/tinyQV/mem_ctrl.v`
+- `hw/tinyQV/register.v`
+- `hw/tinyQV/time.v`
+- `hw/tinyQV/qspi_ctrl.v`
+- `hw/tinyQV/qspi_flash.v`
+- `hw/tinyQV/tinyqv.v`
+
+Existing testbenches preserved unchanged:
+- `dp1/testbench/tb_mac.sv`
+- `dp1/testbench/tb_systolic.sv`
+- `dp1/testbench/tb_fsm.sv`
+- `dp1/testbench/tb_peripheral.sv`
+- `dp1/testbench/tb_dma.sv`
+- `dp1/tb_*.v` (cocotb harnesses)
+- `tb/dma_unit_tb.v`
+- `tb/e2e_npu_tb.v`
+
+Iteration 14 - 2026-02-08 00:00 UTC
+
+Goal:
+Abstract scratchpad SRAMs from `dp1/src/peripheral.v` into a standalone module and instantiate it for A/B/C buffers.
+
+Context:
+User requested all hardware modules to live under `dp1/src` and to abstract SRAM buffers from the peripheral into a standalone module.
+
+Prompt Sent:
+"if you could abstract away those from peripheral.v and create a standalone module, instantize it, and report back with a test verilator command for wsl, that'd be wonderful"
+
+LLM Output:
+- Added `dp1/src/sram_buffer.sv` with parameterized multi-read and multi-write ports.
+- Replaced scratchpad reg arrays in `dp1/src/peripheral.v` with `sram_buffer` instances for spad A/B/C.
+- Preserved DMA/systolic behavior by providing N read ports for A/B and NN write ports for C.
+
+Tests Run:
+- Not run (user did not request).
+
+Results:
+- Not run.
+
+Assumptions:
+- Asynchronous read behavior is required to preserve existing systolic feed timing.
+- Multi-write on spad C is acceptable for N=2 (NN write ports).
+
+Tradeoffs:
+- Scratchpad C uses NN parallel write ports to keep single-cycle result capture on dma_sys_done.
+
+Next Steps:
+- Re-run `tb_dma.sv` and `tb_peripheral.sv` with `dp1/src/sram_buffer.sv` in the compile list.
+
+TinyQV files treated as read-only:
+- `hw/tinyQV/alu.v`
+- `hw/tinyQV/core.v`
+- `hw/tinyQV/counter.v`
+- `hw/tinyQV/cpu.v`
+- `hw/tinyQV/decode.v`
+- `hw/tinyQV/latch_reg.v`
+- `hw/tinyQV/mem_ctrl.v`
+- `hw/tinyQV/register.v`
+- `hw/tinyQV/time.v`
+- `hw/tinyQV/qspi_ctrl.v`
+- `hw/tinyQV/qspi_flash.v`
+- `hw/tinyQV/tinyqv.v`
+
+Existing testbenches preserved unchanged:
+- `dp1/testbench/tb_mac.sv`
+- `dp1/testbench/tb_systolic.sv`
+- `dp1/testbench/tb_fsm.sv`
+- `dp1/testbench/tb_peripheral.sv`
+- `dp1/testbench/tb_dma.sv`
+- `dp1/tb_*.v` (cocotb harnesses)
+- `tb/dma_unit_tb.v`
+- `tb/e2e_npu_tb.v`
+
+Iteration 15 - 2026-02-08 00:00 UTC
+
+Goal:
+Add an end-to-end SPI testbench that exercises `tt_wrapper.v` and validates peripheral MMIO via SPI.
+
+Context:
+User requested a true testbench for the integration path through `tt_wrapper.v`, without modifying TinyQV cores.
+
+Prompt Sent:
+"I wan't a true testbench to see whether the peripheral successfully connects to our tinyQV RISC-V CPU."
+
+LLM Output:
+- Added `dp1/testbench/tb_tt_wrapper.sv` that bit-bangs SPI (mode 0, LSB-first) into `tt_um_tqv_peripheral_harness`.
+- Reused the 2x2 systolic MMIO flow over SPI with verbose PASS/FAIL output and summary.
+
+Tests Run:
+- Not run (user did not request).
+
+Results:
+- Not run.
+
+Assumptions:
+- SPI format uses `reg_rw` in bit 31 and `txn_width` bits [30:29] = 2'b10 for 32-bit transactions.
+- LSB-first MOSI for address/data; MISO read MSB-first per spi_reg shift behavior.
+
+Tradeoffs:
+- SPI-driven test is slower but validates the harness wiring and peripheral MMIO path.
+
+Next Steps:
+- Run Verilator on `dp1/testbench/tb_tt_wrapper.sv` including `dp1/src/tt_wrapper.v` and `dp1/src/test_harness/*.sv`.
+
+TinyQV files treated as read-only:
+- `hw/tinyQV/alu.v`
+- `hw/tinyQV/core.v`
+- `hw/tinyQV/counter.v`
+- `hw/tinyQV/cpu.v`
+- `hw/tinyQV/decode.v`
+- `hw/tinyQV/latch_reg.v`
+- `hw/tinyQV/mem_ctrl.v`
+- `hw/tinyQV/register.v`
+- `hw/tinyQV/time.v`
+- `hw/tinyQV/qspi_ctrl.v`
+- `hw/tinyQV/qspi_flash.v`
+- `hw/tinyQV/tinyqv.v`
+
+Existing testbenches preserved unchanged:
+- `dp1/testbench/tb_mac.sv`
+- `dp1/testbench/tb_systolic.sv`
+- `dp1/testbench/tb_fsm.sv`
+- `dp1/testbench/tb_peripheral.sv`
+- `dp1/testbench/tb_dma.sv`
+- `dp1/testbench/tb_dma_unit.sv`
+- `dp1/tb_*.v` (cocotb harnesses)
+- `tb/dma_unit_tb.v`
+- `tb/e2e_npu_tb.v`

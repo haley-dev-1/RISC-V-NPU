@@ -58,7 +58,7 @@ run_test() {
   TEST_COUNT=$((TEST_COUNT + total))
 }
 
-cd "$ROOT/dp1"
+cd "$ROOT/project/dp1"
 
 # MAC
 rm -rf obj_tb_mac
@@ -161,3 +161,5 @@ run_test "TT_WRAPPER" ./obj_tb_tt_wrapper/Vtb_tt_wrapper
 } | tee -a "$LOG"
 
 exit 0
+
+
