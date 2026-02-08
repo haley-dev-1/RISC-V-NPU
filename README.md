@@ -1,7 +1,9 @@
-# RISC-V-NPU
-# Branch for DP1
 
+
+# AI-HDL - RISC-V-NPU
 AI Hardware Design League (AI-HDL) competition repository for integrating an NPU co-processor/extension onto a base RISC-V CPU.
+
+**Use `SETUP.md` and `RUNME.sh` (setup is for prereqs, `RUNME.sh` is for testing the modules).**
 
 # Competition rules
 - we do not modify any of the RISC-V CPU verilog modules
