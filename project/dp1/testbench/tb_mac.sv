@@ -52,15 +52,25 @@ module tb_mac;
     end
   endfunction
 
+  integer pass_count;
+  integer test_count;
+
   // Apply one transaction and check done/result
   task automatic apply_and_check(
+    input int case_id,
     input logic [31:0] aa,
     input logic [31:0] bb,
     input logic [31:0] accc
   );
     logic [31:0] exp;
+    bit case_pass;
     begin
       exp = expected_wrap32_signed(aa, bb, accc);
+      case_pass = 1'b1;
+
+      $display("[RUN] case_%0d", case_id);
+      $display("[INPUT] a=%h b=%h acc=%h", aa, bb, accc);
+      $display("[EXPECTED OUTPUT] result=%h done=1", exp);
 
       // Drive inputs before compute edge
       @(negedge clk);
@@ -78,13 +88,13 @@ module tb_mac;
       if (done !== 1'b1) begin
         $display("DEBUG t=%0t rst_n=%b valid=%b a=%h b=%h acc=%h -> done=%b result=%h",
                  $time, rst_n, valid, a, b, acc, done, result);
-        $fatal(1, "DONE not asserted when expected. a=%h b=%h acc=%h", aa, bb, accc);
+        case_pass = 1'b0;
       end
 
       if (result !== exp) begin
         $display("DEBUG t=%0t a=%h b=%h acc=%h exp=%h got=%h done=%b",
                  $time, aa, bb, accc, exp, result, done);
-        $fatal(1, "Mismatch!");
+        case_pass = 1'b0;
       end
 
       // Drop valid; next cycle done should deassert
@@ -93,12 +103,24 @@ module tb_mac;
       @(posedge clk);
       @(negedge clk);
       if (done !== 1'b0) begin
-        $fatal(1, "DONE did not deassert as expected. done=%b", done);
+        case_pass = 1'b0;
+      end
+
+      $display("[OUTPUT] result=%h done=%b", result, done);
+      test_count = test_count + 1;
+      if (case_pass) begin
+        pass_count = pass_count + 1;
+        $display("[PASS] case_%0d", case_id);
+      end else begin
+        $display("[FAIL] case_%0d", case_id);
       end
     end
   endtask
 
   initial begin
+    pass_count = 0;
+    test_count = 0;
+
     // Init
     rst_n = 1'b0;
     valid = 1'b0;
@@ -113,26 +135,27 @@ module tb_mac;
     if (!rst_n) $fatal(1, "Reset still low unexpectedly.");
 
     // Directed tests (signed)
-    apply_and_check(32'sd2,   32'sd3,   32'sd4);              // 2*3+4=10
-    apply_and_check(32'sd0,   32'sd12345, -32'sd7);           // 0*b+acc=acc
-    apply_and_check(-32'sd2,  32'sd3,   32'sd4);              // -2*3+4=-2
-    apply_and_check(-32'sd2,  -32'sd3,  32'sd4);              // (-2)*(-3)+4=10
-    apply_and_check(32'sd7,   -32'sd8,  32'sd1);              // 7*-8+1=-55
+    apply_and_check(0, 32'sd2,   32'sd3,   32'sd4);              // 2*3+4=10
+    apply_and_check(1, 32'sd0,   32'sd12345, -32'sd7);           // 0*b+acc=acc
+    apply_and_check(2, -32'sd2,  32'sd3,   32'sd4);              // -2*3+4=-2
+    apply_and_check(3, -32'sd2,  -32'sd3,  32'sd4);              // (-2)*(-3)+4=10
+    apply_and_check(4, 32'sd7,   -32'sd8,  32'sd1);              // 7*-8+1=-55
 
     // Edge cases
-    apply_and_check(32'sd1,   32'sd1,   32'sd0);
-    apply_and_check(-32'sd1,  32'sd1,   32'sd0);
-    apply_and_check(-32'sd1,  -32'sd1,  32'sd0);
-    apply_and_check(32'sh7FFF_FFFF, 32'sd2, 32'sd0);          // INT_MAX*2
-    apply_and_check(32'sh8000_0000, 32'sd2, 32'sd1);          // INT_MIN*2+1
-    apply_and_check(32'sh8000_0000, 32'sh8000_0000, 32'sd0);  // INT_MIN*INT_MIN
+    apply_and_check(5, 32'sd1,   32'sd1,   32'sd0);
+    apply_and_check(6, -32'sd1,  32'sd1,   32'sd0);
+    apply_and_check(7, -32'sd1,  -32'sd1,  32'sd0);
+    apply_and_check(8, 32'sh7FFF_FFFF, 32'sd2, 32'sd0);          // INT_MAX*2
+    apply_and_check(9, 32'sh8000_0000, 32'sd2, 32'sd1);          // INT_MIN*2+1
+    apply_and_check(10, 32'sh8000_0000, 32'sh8000_0000, 32'sd0); // INT_MIN*INT_MIN
 
     // Random tests (>= 200 vectors)
     for (int i = 0; i < 500; i++) begin
-      apply_and_check($urandom(), $urandom(), $urandom());
+      apply_and_check(11 + i, $urandom(), $urandom(), $urandom());
     end
 
-    $display("PASS: All MAC tests passed.");
+    $display("[SUMMARY] %0d OF %0d TESTS PASSED", pass_count, test_count);
+    if (pass_count != test_count) $fatal(1, "MAC tests failed.");
     $finish;
   end
 

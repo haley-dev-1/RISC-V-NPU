@@ -41,6 +41,9 @@ module tb_systolic;
   // Output matrix packed
   logic [N*N*32-1:0]     c_mat_out;
 
+  integer pass_count;
+  integer test_count;
+
   // DUT
   systolic #(.N(N)) dut (
     .clk      (clk),
@@ -121,16 +124,24 @@ module tb_systolic;
   //  beat 1: A[:,1] and B[1,:]
   // --------------------------
   task automatic run_one_2x2_case(
+    input int case_id,
     input logic [31:0] A00, A01, A10, A11,
     input logic [31:0] B00, B01, B10, B11
   );
     logic [31:0] expC00, expC01, expC10, expC11;
+    logic [31:0] gotC00, gotC01, gotC10, gotC11;
+    bit case_pass;
     begin
+      case_pass = 1'b1;
       // Reference busy so Verilator doesn't warn it's unused
       if (busy === 1'bx) $fatal(1, "busy is X");
 
       compute_expected_2x2(A00, A01, A10, A11, B00, B01, B10, B11,
                            expC00, expC01, expC10, expC11);
+
+      $display("[RUN] case_%0d", case_id);
+      $display("[INPUT] A=%h %h %h %h  B=%h %h %h %h", A00, A01, A10, A11, B00, B01, B10, B11);
+      $display("[EXPECTED OUTPUT] C=%h %h %h %h", expC00, expC01, expC10, expC11);
 
       // Pulse start (1 cycle)
       @(negedge clk);
@@ -185,14 +196,32 @@ module tb_systolic;
       // Check after updates settle
       @(negedge clk);
 
-      if (c_at(0) !== expC00) $fatal(1, "C00 mismatch: expected=%h got=%h", expC00, c_at(0));
-      if (c_at(1) !== expC01) $fatal(1, "C01 mismatch: expected=%h got=%h", expC01, c_at(1));
-      if (c_at(2) !== expC10) $fatal(1, "C10 mismatch: expected=%h got=%h", expC10, c_at(2));
-      if (c_at(3) !== expC11) $fatal(1, "C11 mismatch: expected=%h got=%h", expC11, c_at(3));
+      gotC00 = c_at(0);
+      gotC01 = c_at(1);
+      gotC10 = c_at(2);
+      gotC11 = c_at(3);
+
+      if (gotC00 !== expC00) case_pass = 1'b0;
+      if (gotC01 !== expC01) case_pass = 1'b0;
+      if (gotC10 !== expC10) case_pass = 1'b0;
+      if (gotC11 !== expC11) case_pass = 1'b0;
+
+      $display("[OUTPUT] C=%h %h %h %h", gotC00, gotC01, gotC10, gotC11);
+
+      test_count = test_count + 1;
+      if (case_pass) begin
+        pass_count = pass_count + 1;
+        $display("[PASS] case_%0d", case_id);
+      end else begin
+        $display("[FAIL] case_%0d", case_id);
+      end
     end
   endtask
 
   initial begin
+    pass_count = 0;
+    test_count = 0;
+
     // init
     rst_n    = 1'b0;
     start    = 1'b0;
@@ -206,20 +235,22 @@ module tb_systolic;
     @(posedge clk);
 
     // Directed test
-    run_one_2x2_case(32'd1, 32'd2, 32'd3, 32'd4,
+    run_one_2x2_case(0, 32'd1, 32'd2, 32'd3, 32'd4,
                      32'd5, 32'd6, 32'd7, 32'd8);
 
     // Directed signed test with negatives (note: negatives are -32'sdX)
-    run_one_2x2_case(-32'sd1, 32'sd2, 32'sd3, -32'sd4,
+    run_one_2x2_case(1, -32'sd1, 32'sd2, 32'sd3, -32'sd4,
                      32'sd5, -32'sd6, -32'sd7, 32'sd8);
 
     // Random tests
-    for (int k = 0; k < 100; k++) begin
-      run_one_2x2_case($urandom(), $urandom(), $urandom(), $urandom(),
+    for (int k = 0; k < 300; k++) begin
+      run_one_2x2_case(2 + k,
+                       $urandom(), $urandom(), $urandom(), $urandom(),
                        $urandom(), $urandom(), $urandom(), $urandom());
     end
 
-    $display("PASS: All systolic array tests passed.");
+    $display("[SUMMARY] %0d OF %0d TESTS PASSED", pass_count, test_count);
+    if (pass_count != test_count) $fatal(1, "Systolic tests failed.");
     $finish;
   end
 

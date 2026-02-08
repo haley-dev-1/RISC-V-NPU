@@ -72,9 +72,29 @@ module tqvp_example #(
     // Internal system memory + scratchpads (word addressed)
     // --------------------------------------------------------------------
     reg [31:0] sys_mem   [0:SYS_MEM_WORDS-1];
-    reg [31:0] spad_a_mem[0:SPAD_WORDS-1];
-    reg [31:0] spad_b_mem[0:SPAD_WORDS-1];
-    reg [31:0] spad_c_mem[0:SPAD_WORDS-1];
+    // Scratchpad SRAM buffers (standalone module instances)
+    wire [N-1:0][SPAD_AW-1:0] spad_a_raddr;
+    wire [N-1:0]             spad_a_re;
+    wire [N-1:0][31:0]       spad_a_rdata;
+    wire [N-1:0][SPAD_AW-1:0] spad_b_raddr;
+    wire [N-1:0]             spad_b_re;
+    wire [N-1:0][31:0]       spad_b_rdata;
+
+    wire [0:0][SPAD_AW-1:0]  spad_c_raddr;
+    wire [0:0]               spad_c_re;
+    wire [0:0][31:0]         spad_c_rdata;
+
+    wire [0:0]               spad_a_we;
+    wire [0:0][SPAD_AW-1:0]  spad_a_waddr;
+    wire [0:0][31:0]         spad_a_wdata;
+
+    wire [0:0]               spad_b_we;
+    wire [0:0][SPAD_AW-1:0]  spad_b_waddr;
+    wire [0:0][31:0]         spad_b_wdata;
+
+    wire [NN-1:0]            spad_c_we;
+    wire [NN-1:0][SPAD_AW-1:0] spad_c_waddr;
+    wire [NN-1:0][31:0]      spad_c_wdata;
 
     // --------------------------------------------------------------------
     // DMA / accelerator MMIO config registers
@@ -144,14 +164,26 @@ module tqvp_example #(
     logic       sa_start_req;
 
     // DMA channel state (A/B inputs, C output)
-    reg         inA_busy, inA_done_flag, inA_error;
-    reg [31:0]  inA_sys_idx, inA_spad_idx, inA_words_left;
+    wire        inA_busy;
+    wire        inA_done_flag;
+    wire        inA_error;
+    wire [31:0] inA_sys_idx;
+    wire [31:0] inA_spad_idx;
+    wire        inA_fire;
 
-    reg         inB_busy, inB_done_flag, inB_error;
-    reg [31:0]  inB_sys_idx, inB_spad_idx, inB_words_left;
+    wire        inB_busy;
+    wire        inB_done_flag;
+    wire        inB_error;
+    wire [31:0] inB_sys_idx;
+    wire [31:0] inB_spad_idx;
+    wire        inB_fire;
 
-    reg         out_busy, out_done_flag, out_error;
-    reg [31:0]  out_sys_idx, out_spad_idx, out_words_left;
+    wire        out_busy;
+    wire        out_done_flag;
+    wire        out_error;
+    wire [31:0] out_sys_idx;
+    wire [31:0] out_spad_idx;
+    wire        out_fire;
 
     // Controller-issued pulse
     reg sa_start_pulse;
@@ -203,12 +235,12 @@ module tqvp_example #(
         for (r_idx = 0; r_idx < N; r_idx = r_idx + 1) begin
             a_word_idx = spad_a_base_word + (r_idx * N) + int'(dma_beat_idx);
             if (a_word_idx < SPAD_WORDS)
-                dma_a_vec_in_r[r_idx*32 +: 32] = spad_a_mem[a_word_idx];
+                dma_a_vec_in_r[r_idx*32 +: 32] = spad_a_rdata[r_idx];
         end
         for (c_idx = 0; c_idx < N; c_idx = c_idx + 1) begin
             b_word_idx = spad_b_base_word + (int'(dma_beat_idx) * N) + c_idx;
             if (b_word_idx < SPAD_WORDS)
-                dma_b_vec_in_r[c_idx*32 +: 32] = spad_b_mem[b_word_idx];
+                dma_b_vec_in_r[c_idx*32 +: 32] = spad_b_rdata[c_idx];
         end
     end
 
@@ -268,38 +300,41 @@ module tqvp_example #(
         end
     endfunction
 
-    // DMA parameter validation helper
-    function automatic bit dma_params_ok(
-        input [31:0] sys_addr,
-        input [31:0] spad_addr,
-        input [31:0] len_bytes
+    dma #(
+        .SYS_MEM_WORDS(SYS_MEM_WORDS),
+        .SPAD_WORDS(SPAD_WORDS)
+    ) u_dma (
+        .clk(clk),
+        .rst_n(rst_n),
+        .start_a(inA_start_req),
+        .start_b(inB_start_req),
+        .start_out(out_start_req),
+        .src_a_addr(cfg_src_a_addr),
+        .src_b_addr(cfg_src_b_addr),
+        .dst_c_addr(cfg_dst_c_addr),
+        .len_bytes(cfg_len_bytes),
+        .spad_a_base(cfg_spad_a_base),
+        .spad_b_base(cfg_spad_b_base),
+        .spad_c_base(cfg_spad_c_base),
+        .inA_busy(inA_busy),
+        .inA_done(inA_done_flag),
+        .inA_error(inA_error),
+        .inA_sys_idx(inA_sys_idx),
+        .inA_spad_idx(inA_spad_idx),
+        .inA_fire(inA_fire),
+        .inB_busy(inB_busy),
+        .inB_done(inB_done_flag),
+        .inB_error(inB_error),
+        .inB_sys_idx(inB_sys_idx),
+        .inB_spad_idx(inB_spad_idx),
+        .inB_fire(inB_fire),
+        .out_busy(out_busy),
+        .out_done(out_done_flag),
+        .out_error(out_error),
+        .out_sys_idx(out_sys_idx),
+        .out_spad_idx(out_spad_idx),
+        .out_fire(out_fire)
     );
-        int unsigned sys_idx;
-        int unsigned spad_idx;
-        int unsigned words;
-        begin
-            if (len_bytes == 32'd0) begin
-                dma_params_ok = 1'b0;
-            end else if (len_bytes[1:0] != 2'b00) begin
-                dma_params_ok = 1'b0;
-            end else if ((sys_addr[1:0] != 2'b00) || (spad_addr[1:0] != 2'b00)) begin
-                dma_params_ok = 1'b0;
-            end else if ((sys_addr[31:SYS_AW+2] != 0) || (spad_addr[31:SPAD_AW+2] != 0)) begin
-                dma_params_ok = 1'b0;
-            end else begin
-                sys_idx  = sys_addr  >> 2;
-                spad_idx = spad_addr >> 2;
-                words    = len_bytes >> 2;
-                if ((sys_idx + words) > SYS_MEM_WORDS) begin
-                    dma_params_ok = 1'b0;
-                end else if ((spad_idx + words) > SPAD_WORDS) begin
-                    dma_params_ok = 1'b0;
-                end else begin
-                    dma_params_ok = 1'b1;
-                end
-            end
-        end
-    endfunction
 
     // MMIO decode
     wire mmio_wr = (data_write_n != 2'b11);
@@ -330,6 +365,18 @@ module tqvp_example #(
     wire [31:0] spad_c_base_word = cfg_spad_c_base >> 2;
     wire spad_c_range_ok = spad_c_base_aligned && spad_c_base_hi_zero &&
                            ((spad_c_base_word + EXPECTED_WORDS) <= SPAD_WORDS);
+
+    // Scratchpad read address generation for DMA-driven systolic
+    generate
+        for (i = 0; i < N; i = i + 1) begin : SPAD_READ_ADDR
+            wire [31:0] spad_a_addr_full = spad_a_base_word + (i * N) + int'(dma_beat_idx);
+            wire [31:0] spad_b_addr_full = spad_b_base_word + (int'(dma_beat_idx) * N) + i;
+            assign spad_a_raddr[i] = spad_a_addr_full[SPAD_AW-1:0];
+            assign spad_a_re[i]    = (spad_a_addr_full < SPAD_WORDS);
+            assign spad_b_raddr[i] = spad_b_addr_full[SPAD_AW-1:0];
+            assign spad_b_re[i]    = (spad_b_addr_full < SPAD_WORDS);
+        end
+    endgenerate
 
 
     // FIFO pop when systolic accepts a beat
@@ -541,27 +588,6 @@ module tqvp_example #(
 
             acc_state <= ACC_IDLE;
 
-            inA_busy      <= 1'b0;
-            inA_done_flag <= 1'b0;
-            inA_error     <= 1'b0;
-            inA_sys_idx   <= 32'd0;
-            inA_spad_idx  <= 32'd0;
-            inA_words_left<= 32'd0;
-
-            inB_busy      <= 1'b0;
-            inB_done_flag <= 1'b0;
-            inB_error     <= 1'b0;
-            inB_sys_idx   <= 32'd0;
-            inB_spad_idx  <= 32'd0;
-            inB_words_left<= 32'd0;
-
-            out_busy      <= 1'b0;
-            out_done_flag <= 1'b0;
-            out_error     <= 1'b0;
-            out_sys_idx   <= 32'd0;
-            out_spad_idx  <= 32'd0;
-            out_words_left<= 32'd0;
-
             sa_start_pulse  <= 1'b0;
 
             dma_streaming <= 1'b0;
@@ -570,11 +596,7 @@ module tqvp_example #(
             for (mi = 0; mi < SYS_MEM_WORDS; mi = mi + 1) begin
                 sys_mem[mi] = 32'd0;
             end
-            for (mi = 0; mi < SPAD_WORDS; mi = mi + 1) begin
-                spad_a_mem[mi] = 32'd0;
-                spad_b_mem[mi] = 32'd0;
-                spad_c_mem[mi] = 32'd0;
-            end
+            // scratchpad SRAMs initialize internally
         end else begin
             // default pulses
             sa_start_pulse  <= 1'b0;
@@ -628,76 +650,9 @@ module tqvp_example #(
                 sys_err_sticky     <= 1'b0;
             end
 
-            // DMA channel A (sysmem -> spad_a)
-            if (inA_start_req) begin
-                inA_done_flag <= 1'b0;
-                inA_error     <= 1'b0;
-                if (!dma_params_ok(cfg_src_a_addr, cfg_spad_a_base, cfg_len_bytes)) begin
-                    inA_error <= 1'b1;
-                    inA_busy  <= 1'b0;
-                end else begin
-                    inA_busy       <= 1'b1;
-                    inA_sys_idx    <= cfg_src_a_addr  >> 2;
-                    inA_spad_idx   <= cfg_spad_a_base >> 2;
-                    inA_words_left <= cfg_len_bytes   >> 2;
-                end
-            end else if (inA_busy) begin
-                spad_a_mem[inA_spad_idx] <= sys_mem[inA_sys_idx];
-                inA_sys_idx    <= inA_sys_idx + 1;
-                inA_spad_idx   <= inA_spad_idx + 1;
-                inA_words_left <= inA_words_left - 1;
-                if (inA_words_left == 32'd1) begin
-                    inA_busy      <= 1'b0;
-                    inA_done_flag <= 1'b1;
-                end
-            end
-
-            // DMA channel B (sysmem -> spad_b)
-            if (inB_start_req) begin
-                inB_done_flag <= 1'b0;
-                inB_error     <= 1'b0;
-                if (!dma_params_ok(cfg_src_b_addr, cfg_spad_b_base, cfg_len_bytes)) begin
-                    inB_error <= 1'b1;
-                    inB_busy  <= 1'b0;
-                end else begin
-                    inB_busy       <= 1'b1;
-                    inB_sys_idx    <= cfg_src_b_addr  >> 2;
-                    inB_spad_idx   <= cfg_spad_b_base >> 2;
-                    inB_words_left <= cfg_len_bytes   >> 2;
-                end
-            end else if (inB_busy) begin
-                spad_b_mem[inB_spad_idx] <= sys_mem[inB_sys_idx];
-                inB_sys_idx    <= inB_sys_idx + 1;
-                inB_spad_idx   <= inB_spad_idx + 1;
-                inB_words_left <= inB_words_left - 1;
-                if (inB_words_left == 32'd1) begin
-                    inB_busy      <= 1'b0;
-                    inB_done_flag <= 1'b1;
-                end
-            end
-
-            // Output DMA (spad_c -> sysmem)
-            if (out_start_req) begin
-                out_done_flag <= 1'b0;
-                out_error     <= 1'b0;
-                if (!dma_params_ok(cfg_dst_c_addr, cfg_spad_c_base, cfg_len_bytes)) begin
-                    out_error <= 1'b1;
-                    out_busy  <= 1'b0;
-                end else begin
-                    out_busy       <= 1'b1;
-                    out_sys_idx    <= cfg_dst_c_addr  >> 2;
-                    out_spad_idx   <= cfg_spad_c_base >> 2;
-                    out_words_left <= cfg_len_bytes   >> 2;
-                end
-            end else if (out_busy) begin
-                sys_mem[out_sys_idx] <= spad_c_mem[out_spad_idx];
-                out_sys_idx    <= out_sys_idx + 1;
-                out_spad_idx   <= out_spad_idx + 1;
-                out_words_left <= out_words_left - 1;
-                if (out_words_left == 32'd1) begin
-                    out_busy      <= 1'b0;
-                    out_done_flag <= 1'b1;
-                end
+            // DMA channel A/B/out data moves (indices come from DMA)
+            if (out_fire) begin
+                sys_mem[out_sys_idx[SYS_AW-1:0]] <= spad_c_rdata[0];
             end
 
             // Streaming control for DMA-driven systolic
@@ -711,18 +666,83 @@ module tqvp_example #(
             end
 
             // Capture compute results into spad_c on done
-            if (dma_sys_done) begin
-                for (wr = 0; wr < N; wr = wr + 1) begin
-                    for (wc = 0; wc < N; wc = wc + 1) begin
-                        if ((spad_c_base_word + (wr * N) + wc) < SPAD_WORDS) begin
-                            spad_c_mem[spad_c_base_word + (wr * N) + wc] <=
-                                dma_c_mat_out[((wr * N + wc) * 32) +: 32];
-                        end
-                    end
-                end
-            end
+            // spad_c writes handled via SRAM write ports
         end
     end
+
+    // Scratchpad A write port (DMA A channel)
+    assign spad_a_we[0]    = inA_fire;
+    assign spad_a_waddr[0] = inA_spad_idx[SPAD_AW-1:0];
+    assign spad_a_wdata[0] = sys_mem[inA_sys_idx[SYS_AW-1:0]];
+
+    // Scratchpad B write port (DMA B channel)
+    assign spad_b_we[0]    = inB_fire;
+    assign spad_b_waddr[0] = inB_spad_idx[SPAD_AW-1:0];
+    assign spad_b_wdata[0] = sys_mem[inB_sys_idx[SYS_AW-1:0]];
+
+    // Scratchpad C read port (DMA OUT channel)
+    assign spad_c_re[0]    = out_fire;
+    assign spad_c_raddr[0] = out_spad_idx[SPAD_AW-1:0];
+
+    // Scratchpad C write ports (capture systolic output)
+    genvar gwr;
+    genvar gwc;
+    generate
+        for (gwr = 0; gwr < N; gwr = gwr + 1) begin : SPAD_C_WR_ROWS
+            for (gwc = 0; gwc < N; gwc = gwc + 1) begin : SPAD_C_WR_COLS
+                localparam int IDX = (gwr * N) + gwc;
+                wire [31:0] spad_c_addr_full = spad_c_base_word + (gwr * N) + gwc;
+                assign spad_c_we[IDX] = dma_sys_done && (spad_c_addr_full < SPAD_WORDS);
+                assign spad_c_waddr[IDX] = spad_c_addr_full[SPAD_AW-1:0];
+                assign spad_c_wdata[IDX] = dma_c_mat_out[(IDX * 32) +: 32];
+            end
+        end
+    endgenerate
+
+    sram_buffer #(
+        .DEPTH(SPAD_WORDS),
+        .ADDR_WIDTH(SPAD_AW),
+        .RD_PORTS(N),
+        .WR_PORTS(1)
+    ) u_spad_a (
+        .clk(clk),
+        .re(spad_a_re),
+        .raddr(spad_a_raddr),
+        .rdata(spad_a_rdata),
+        .we(spad_a_we),
+        .waddr(spad_a_waddr),
+        .wdata(spad_a_wdata)
+    );
+
+    sram_buffer #(
+        .DEPTH(SPAD_WORDS),
+        .ADDR_WIDTH(SPAD_AW),
+        .RD_PORTS(N),
+        .WR_PORTS(1)
+    ) u_spad_b (
+        .clk(clk),
+        .re(spad_b_re),
+        .raddr(spad_b_raddr),
+        .rdata(spad_b_rdata),
+        .we(spad_b_we),
+        .waddr(spad_b_waddr),
+        .wdata(spad_b_wdata)
+    );
+
+    sram_buffer #(
+        .DEPTH(SPAD_WORDS),
+        .ADDR_WIDTH(SPAD_AW),
+        .RD_PORTS(1),
+        .WR_PORTS(NN)
+    ) u_spad_c (
+        .clk(clk),
+        .re(spad_c_re),
+        .raddr(spad_c_raddr),
+        .rdata(spad_c_rdata),
+        .we(spad_c_we),
+        .waddr(spad_c_waddr),
+        .wdata(spad_c_wdata)
+    );
 
     // --------------------------------------------------------------------
     // Read mux

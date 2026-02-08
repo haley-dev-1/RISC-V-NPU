@@ -5,6 +5,8 @@ module tb_peripheral;
 
   integer cycles;
   logic [31:0] rdata;
+  integer pass_count;
+  integer test_count;
 
   // clock/reset
   logic clk = 0;
@@ -117,14 +119,21 @@ module tb_peripheral;
   // Run one 2x2 case through MMIO.
   // Mapping: each beat k provides A[:,k] in 0x00.. and B[k,:] in 0x10..
   task automatic run_one_case_2x2(
+    input int case_id,
     input logic [31:0] A00, A01, A10, A11,
     input logic [31:0] B00, B01, B10, B11
   );
     logic [31:0] expC00, expC01, expC10, expC11;
-    logic [31:0] got;
+    logic [31:0] gotC00, gotC01, gotC10, gotC11;
+    bit case_pass;
     begin
+      case_pass = 1'b1;
       compute_expected_2x2(A00, A01, A10, A11, B00, B01, B10, B11,
                            expC00, expC01, expC10, expC11);
+
+      $display("[RUN] case_%0d", case_id);
+      $display("[INPUT] A=%h %h %h %h  B=%h %h %h %h", A00, A01, A10, A11, B00, B01, B10, B11);
+      $display("[EXPECTED OUTPUT] C=%h %h %h %h", expC00, expC01, expC10, expC11);
 
       // Beat 0: A[:,0] and B[0,:]
       mmio_write(6'h00, A00);
@@ -157,19 +166,32 @@ module tb_peripheral;
       end
 
       // Read back results and check
-      mmio_read(6'h30, got); if (got !== expC00) $fatal(1, "C00 mismatch exp=%h got=%h", expC00, got);
-      mmio_read(6'h31, got); if (got !== expC01) $fatal(1, "C01 mismatch exp=%h got=%h", expC01, got);
-      mmio_read(6'h32, got); if (got !== expC10) $fatal(1, "C10 mismatch exp=%h got=%h", expC10, got);
-      mmio_read(6'h33, got); if (got !== expC11) $fatal(1, "C11 mismatch exp=%h got=%h", expC11, got);
+      mmio_read(6'h30, gotC00); if (gotC00 !== expC00) case_pass = 1'b0;
+      mmio_read(6'h31, gotC01); if (gotC01 !== expC01) case_pass = 1'b0;
+      mmio_read(6'h32, gotC10); if (gotC10 !== expC10) case_pass = 1'b0;
+      mmio_read(6'h33, gotC11); if (gotC11 !== expC11) case_pass = 1'b0;
+
+      $display("[OUTPUT] C=%h %h %h %h", gotC00, gotC01, gotC10, gotC11);
 
       // Reference these outputs so Verilator doesn't warn they're unused
-      if ((&uo_out) === 1'bx) $fatal(1, "uo_out has Xs");
-      if (data_ready !== 1'b1) $fatal(1, "data_ready not 1");
-      if (user_interrupt !== 1'b0) $fatal(1, "user_interrupt not 0");
+      if ((&uo_out) === 1'bx) case_pass = 1'b0;
+      if (data_ready !== 1'b1) case_pass = 1'b0;
+      if (user_interrupt !== 1'b0) case_pass = 1'b0;
+
+      test_count = test_count + 1;
+      if (case_pass) begin
+        pass_count = pass_count + 1;
+        $display("[PASS] case_%0d", case_id);
+      end else begin
+        $display("[FAIL] case_%0d", case_id);
+      end
     end
   endtask
 
   initial begin
+    pass_count = 0;
+    test_count = 0;
+
     ui_in = '0;
     address = '0;
     data_in = '0;
@@ -184,6 +206,7 @@ module tb_peripheral;
 
     // Directed signed test (note: negatives are -32'sdX)
     run_one_case_2x2(
+      0,
       32'sd1,  -32'sd2,
       32'sd3,  32'sd4,
       -32'sd5, 32'sd6,
@@ -192,11 +215,13 @@ module tb_peripheral;
 
     // Random stress (a few cases)
     for (int t = 0; t < 25; t++) begin
-      run_one_case_2x2($urandom(), $urandom(), $urandom(), $urandom(),
+      run_one_case_2x2(t + 1,
+                       $urandom(), $urandom(), $urandom(), $urandom(),
                        $urandom(), $urandom(), $urandom(), $urandom());
     end
 
-    $display("PASS: Peripheral MMIO systolic tests passed.");
+    $display("[SUMMARY] %0d OF %0d TESTS PASSED", pass_count, test_count);
+    if (pass_count != test_count) $fatal(1, "Peripheral MMIO systolic tests failed.");
     $finish;
   end
 
